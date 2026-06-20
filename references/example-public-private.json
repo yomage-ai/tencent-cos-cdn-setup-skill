@@ -1,0 +1,64 @@
+{
+  "project": "demo-app",
+  "env": "prod",
+  "region": "ap-shanghai",
+  "appid": "1250000000",
+  "mode": "public-private",
+  "buckets": {
+    "public": {
+      "base_name": "demo-public-prod",
+      "acl": "public-read"
+    },
+    "private": {
+      "base_name": "demo-private-prod",
+      "acl": "private"
+    }
+  },
+  "cors": {
+    "origins": [
+      "https://app.example.com",
+      "http://localhost:5173"
+    ],
+    "methods": [
+      "GET",
+      "PUT",
+      "HEAD",
+      "OPTIONS"
+    ],
+    "allowed_headers": [
+      "*"
+    ],
+    "expose_headers": [
+      "ETag",
+      "Content-Length",
+      "Content-Type"
+    ],
+    "max_age_seconds": 600
+  },
+  "cam": {
+    "enabled": true,
+    "user_name": "demo-cos-prod",
+    "create_user": true,
+    "create_access_key": false,
+    "policy_name": "demo-cos-prod-policy"
+  },
+  "cdn": {
+    "enabled": true,
+    "area": "mainland",
+    "service_type": "web",
+    "public_domain": "public.example.com",
+    "private_domain": "private.example.com",
+    "private_auth": {
+      "type": "tencent_type_a",
+      "key_env": "TENCENT_CDN_AUTH_KEY",
+      "sign_param": "sign",
+      "ttl_seconds": 3600
+    }
+  },
+  "dns": {
+    "enabled": true,
+    "zone": "example.com",
+    "ttl": 600,
+    "replace_existing": false
+  }
+}

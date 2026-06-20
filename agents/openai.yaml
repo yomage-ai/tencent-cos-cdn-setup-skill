@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tencent COS/CDN Setup"
+  short_description: "Configure Tencent COS, CDN, DNSPod, and CAM safely"
+  default_prompt: "Use $tencent-cos-cdn-setup-skill to plan and configure Tencent COS, CDN, DNSPod, and CAM for my app."
