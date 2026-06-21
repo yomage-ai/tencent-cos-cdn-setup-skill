@@ -12,6 +12,7 @@ Use this reference when the user is not familiar with Tencent Cloud setup.
 - Do not show `export TENCENTCLOUD_SECRET_ID=...` to beginners. Say "I will use the credentials locally after you provide them."
 - Do not ask beginners to install Python packages or SDKs. Let the script prepare its isolated runtime automatically.
 - Whenever the user must operate in Tencent Cloud, include the direct URL, click path, search keyword, fields to check, and exact action in the same response.
+- Do not write generated working files into the user's project folder. Use the script's isolated run directory for config, plan, state, secrets, and reports.
 
 ## First Three Questions
 
@@ -37,25 +38,25 @@ For a beginner smoke test, guide the user through this:
 
 1. Open [CAM Users](https://console.cloud.tencent.com/cam/user).
 2. Click **Users > User List** if the page does not open there directly.
-4. Click **Create User** / **New User**.
-5. Choose **Custom creation**.
-6. User type: choose the normal sub-user type that can access resources and receive messages.
-7. User name: use something like `cos-skill-installer-test`.
-8. Access method:
+3. Click **Create User** / **New User**.
+4. Choose **Custom creation**.
+5. User type: choose the normal sub-user type that can access resources and receive messages.
+6. User name: use something like `cos-skill-installer-test`.
+7. Access method:
    - Enable **Programming access**, **API access**, or **Access key**.
    - Do not enable console login unless the page requires it.
    - Keep password/login-related options default if console login is disabled.
-9. User permissions:
+8. User permissions:
    - For this skill smoke test, attach **AdministratorAccess**.
    - Explain that this is required for the simplest full test because the skill creates COS, CDN, DNSPod, and CAM resources.
    - Tell the user to disable or delete this key after the test.
    - For formal company use, ask an admin to provide a temporary key with COS, CDN, DNSPod, and CAM management permissions.
-10. Tags: keep default or skip.
-11. Review: confirm and create.
-12. Open the created user details.
-13. Open **API Key** / **Access Key**.
-14. Create a key if one was not created automatically.
-15. Copy `SecretId` and `SecretKey`.
+9. Tags: keep default or skip.
+10. Review: confirm and create.
+11. Open the created user details.
+12. Open **API Key** / **Access Key**.
+13. Create a key if one was not created automatically.
+14. Copy `SecretId` and `SecretKey`.
 
 Important: Tencent Cloud only shows `SecretKey` when the key is created. Tell the user to copy it immediately and store it safely.
 
@@ -106,6 +107,7 @@ I prepared a plan. It will create:
 - DNSPod CNAME records only if DNSPod is enabled
 
 Nothing has been changed in Tencent Cloud yet.
+I kept the working files in an isolated run directory, not in your project folder.
 ```
 
 Avoid listing raw action IDs such as `cos.create_bucket` unless the user asks.
@@ -140,7 +142,8 @@ If the console shows a CDN service authorization prompt, click the authorization
 
 After apply or verify, always give the user:
 
-- Link to the generated report file.
+- The project integration values they need to copy into their own app config.
+- Link to the generated report file in the isolated run directory.
 - A short "Done / Not done yet" summary.
 - The top required manual actions with Tencent Cloud links and click paths.
 

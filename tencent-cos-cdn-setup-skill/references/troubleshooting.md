@@ -25,7 +25,7 @@
 - `CdnHostNoIcp`: use an eligible acceleration area or complete ICP filing.
 - `CdnHostExists`: reuse the domain and review existing config before updating.
 - `CdnConfigInvalidHost`: verify the domain is a valid public hostname.
-- `域名部署中，请在域名部署完成后重试`: run `resume plan.json --apply` after the CDN domain status becomes deployed/online.
+- `域名部署中，请在域名部署完成后重试`: run `resume "$RUN_DIR/plan.json" --apply` after the CDN domain status becomes deployed/online.
 - TypeA format error: ensure the key is 6-32 letters/digits and `FileExtensions`/`FilterType` are present.
 - Private CDN returns 403 from COS: check COS bucket CDN service authorization / origin-pull authorization in the COS console.
 - `CosPrivateAccess = off`: private COS origin access is not complete. Rerun resume; if still off, enable it in the COS/CDN console.

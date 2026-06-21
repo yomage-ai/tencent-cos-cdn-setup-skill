@@ -13,6 +13,8 @@
 5. Codex 先生成计划，不会直接改腾讯云。
 6. 你确认后，再让 Codex 执行真实配置。
 
+默认情况下，过程文件会放在用户缓存目录里的独立运行目录，不会写进你的项目仓库。完成后你只需要拿走项目配置需要的值。
+
 ### 安装
 
 在终端执行：
@@ -130,16 +132,17 @@ Codex 第一步只会生成计划，不应该直接修改腾讯云。
 - 一份腾讯云资源清单。
 - 一份待执行动作清单。
 - 一份执行/验证后的用户验收清单，包含控制台链接、搜索关键词、检查字段、当前状态、是否完成和未完成原因。
-- 必要时，一份你项目里可以参考的对象存储配置片段。
+- 一组你项目需要使用的配置数据，例如 region、bucket、CDN 域名、CORS 来源、private CDN TypeA key 的保存位置。
 
 ### 给懂命令行的人
 
 这个 skill 也带了 CLI：
 
 ```bash
-python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py init-config --mode public-private --out config.json
-python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py plan config.json --out plan.json --report report.md
-python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py apply plan.json
+RUN_DIR="$(python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py run-dir --project my-app --env testing --create)"
+python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py init-config --mode public-private --out "$RUN_DIR/config.json"
+python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py plan "$RUN_DIR/config.json" --out "$RUN_DIR/plan.json" --report "$RUN_DIR/plan.md"
+python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py apply "$RUN_DIR/plan.json"
 ```
 
 不带 `--apply` 时，`apply` 只是 dry-run，不会改腾讯云。
@@ -149,15 +152,15 @@ python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py apply plan.json
 真实执行建议这样跑，失败时会停下来，修好后可以继续：
 
 ```bash
-python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py apply plan.json --apply --stop-on-failure
-python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py resume plan.json --apply
+python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py apply "$RUN_DIR/plan.json" --apply --stop-on-failure
+python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py resume "$RUN_DIR/plan.json" --apply
 ```
 
 执行后会生成：
 
-- `plan.state.json`：记录已经成功的动作，避免重复创建。
-- `plan.secrets.json`：如果自动生成了 private CDN TypeA key，会保存在这里。不要提交这个文件，要把 key 保存到你的后端密钥系统。
-- `plan.apply-report.md`：执行后的用户验收清单和必须手动完成事项。
+- `$RUN_DIR/plan.state.json`：记录已经成功的动作，避免重复创建。
+- `$RUN_DIR/plan.secrets.json`：如果自动生成了 private CDN TypeA key，会保存在这里。不要提交这个文件，要把 key 保存到你的后端密钥系统。
+- `$RUN_DIR/plan.apply-report.md`：执行后的用户验收清单、必须手动完成事项、项目需要使用的配置数据。
 
 ### 备用安装方式
 
@@ -179,6 +182,8 @@ You do not need to understand COS, CDN, DNSPod, or CAM before using it. The inte
 4. Codex asks questions; answer what you know and say "I don't know" when unsure.
 5. Codex generates a plan first.
 6. Only after you confirm should Codex apply real Tencent Cloud changes.
+
+By default, generated working files are kept in an isolated run directory under the user cache, not in your project repository. After setup, copy only the needed integration values into your app config.
 
 ### Install
 
@@ -289,9 +294,10 @@ Never commit or publicly share SecretKey values, CDN auth keys, or certificate p
 The skill also includes a CLI:
 
 ```bash
-python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py init-config --mode public-private --out config.json
-python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py plan config.json --out plan.json --report report.md
-python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py apply plan.json
+RUN_DIR="$(python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py run-dir --project my-app --env testing --create)"
+python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py init-config --mode public-private --out "$RUN_DIR/config.json"
+python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py plan "$RUN_DIR/config.json" --out "$RUN_DIR/plan.json" --report "$RUN_DIR/plan.md"
+python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py apply "$RUN_DIR/plan.json"
 ```
 
 Without `--apply`, `apply` is only a dry run and will not change Tencent Cloud.
@@ -301,15 +307,15 @@ During real apply, the script auto-prepares an isolated Python runtime for Tence
 Recommended real apply flow:
 
 ```bash
-python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py apply plan.json --apply --stop-on-failure
-python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py resume plan.json --apply
+python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py apply "$RUN_DIR/plan.json" --apply --stop-on-failure
+python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py resume "$RUN_DIR/plan.json" --apply
 ```
 
 Generated local files:
 
-- `plan.state.json`: completed action state, used for resume.
-- `plan.secrets.json`: generated private CDN TypeA keys, if any. Do not commit it; store the key in your backend secret manager.
-- `plan.apply-report.md`: post-apply acceptance checklist and required manual actions.
+- `$RUN_DIR/plan.state.json`: completed action state, used for resume.
+- `$RUN_DIR/plan.secrets.json`: generated private CDN TypeA keys, if any. Do not commit it; store the key in your backend secret manager.
+- `$RUN_DIR/plan.apply-report.md`: post-apply acceptance checklist, required manual actions, and project integration values.
 
 ### Alternative Install
 

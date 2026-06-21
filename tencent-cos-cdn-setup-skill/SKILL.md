@@ -17,19 +17,25 @@ Use this skill to build or audit a Tencent Cloud standard COS delivery stack. Pr
    - Private downloads only -> `private-only`
    - Both public and private files -> `public-private`
 5. Read `references/config-schema.md` when creating or reviewing a config file.
-6. Generate a plan before applying any real Tencent Cloud change:
+6. Create an isolated run directory outside the user project before writing any generated files:
 
 ```bash
-python3 scripts/tencent_cos_cdn.py plan config.json --out plan.json --report report.md
+RUN_DIR="$(python3 scripts/tencent_cos_cdn.py run-dir --project my-app --env testing --create)"
 ```
 
-7. Summarize the plan in plain language for the user. Mention what will be created and what will remain manual.
-8. Ask for explicit confirmation before applying real changes. For real cloud changes, export Tencent Cloud credentials and run:
+7. Generate a plan before applying any real Tencent Cloud change. Write config, plan, state, secrets, and reports under the isolated run directory, not the user's project:
+
+```bash
+python3 scripts/tencent_cos_cdn.py plan "$RUN_DIR/config.json" --out "$RUN_DIR/plan.json" --report "$RUN_DIR/plan.md"
+```
+
+8. Summarize the plan in plain language for the user. Mention what will be created and what will remain manual.
+9. Ask for explicit confirmation before applying real changes. For real cloud changes, export Tencent Cloud credentials and run:
 
 ```bash
 export TENCENTCLOUD_SECRET_ID="..."
 export TENCENTCLOUD_SECRET_KEY="..."
-python3 scripts/tencent_cos_cdn.py apply plan.json --apply --stop-on-failure
+python3 scripts/tencent_cos_cdn.py apply "$RUN_DIR/plan.json" --apply --stop-on-failure
 ```
 
 Without `--apply`, `apply` is a dry run.
@@ -37,16 +43,16 @@ Without `--apply`, `apply` is a dry run.
 If an apply run fails after some actions succeed, resume with:
 
 ```bash
-python3 scripts/tencent_cos_cdn.py resume plan.json --apply
+python3 scripts/tencent_cos_cdn.py resume "$RUN_DIR/plan.json" --apply
 ```
 
-9. Verify DNS/CDN behavior:
+10. Verify DNS/CDN behavior:
 
 ```bash
-python3 scripts/tencent_cos_cdn.py verify plan.json --report verify.md
+python3 scripts/tencent_cos_cdn.py verify "$RUN_DIR/plan.json" --report "$RUN_DIR/verify.md"
 ```
 
-After apply or verify, always point the user to the generated apply/verify report and summarize the top incomplete manual items. Do not end with only raw command output.
+After apply or verify, summarize the integration values the project needs, point to the generated apply/verify report in the run directory, and summarize the top incomplete manual items. Do not end with only raw command output.
 
 ## Beginner Guidance
 
@@ -62,6 +68,12 @@ Follow these rules:
 - After collecting answers, say what will be created in plain language, then ask whether to generate the plan.
 - Do not ask beginners to install Python SDK dependencies. The bundled script auto-creates an isolated runtime in the user cache when SDKs are missing.
 - For private CDN, highlight that COS private origin authorization is mandatory and must be checked in the COS console even when the script tries to enable `CosPrivateAccess`.
+
+## Project File Rule
+
+Treat this skill as a one-time Tencent Cloud configuration assistant. Do not create `config.json`, `plan.json`, `report.md`, state files, secrets files, or verification reports inside the user's project repository by default.
+
+Use an isolated run directory under the skill cache for all generated working files. Only write into the user's project if the user explicitly asks for a project config file or code change. The final answer should give the user the configuration values they need to copy into their own app config, plus the run-directory report path for audit/acceptance.
 
 ## User Operation Link Rule
 
@@ -136,30 +148,31 @@ Read `references/safety-rules.md` before applying changes to a real Tencent Clou
 Create a starter config:
 
 ```bash
-python3 scripts/tencent_cos_cdn.py init-config --mode public-private --out cos-cdn-config.json
+RUN_DIR="$(python3 scripts/tencent_cos_cdn.py run-dir --project my-app --env testing --create)"
+python3 scripts/tencent_cos_cdn.py init-config --mode public-private --out "$RUN_DIR/config.json"
 ```
 
 Render only the CAM policy:
 
 ```bash
-python3 scripts/tencent_cos_cdn.py render-policy config.json
+python3 scripts/tencent_cos_cdn.py render-policy "$RUN_DIR/config.json"
 ```
 
 Show planned actions without contacting Tencent Cloud:
 
 ```bash
-python3 scripts/tencent_cos_cdn.py plan config.json --out plan.json
-python3 scripts/tencent_cos_cdn.py apply plan.json
+python3 scripts/tencent_cos_cdn.py plan "$RUN_DIR/config.json" --out "$RUN_DIR/plan.json" --report "$RUN_DIR/plan.md"
+python3 scripts/tencent_cos_cdn.py apply "$RUN_DIR/plan.json"
 ```
 
 Apply real changes:
 
 ```bash
-python3 scripts/tencent_cos_cdn.py apply plan.json --apply --stop-on-failure
+python3 scripts/tencent_cos_cdn.py apply "$RUN_DIR/plan.json" --apply --stop-on-failure
 ```
 
 Verify after DNS propagation:
 
 ```bash
-python3 scripts/tencent_cos_cdn.py verify plan.json
+python3 scripts/tencent_cos_cdn.py verify "$RUN_DIR/plan.json" --report "$RUN_DIR/verify.md"
 ```

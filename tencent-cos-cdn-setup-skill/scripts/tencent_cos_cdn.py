@@ -75,9 +75,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     init.add_argument("--mode", choices=sorted(VALID_MODES), default="public-private")
     init.add_argument("--out", required=True)
 
+    run_dir = sub.add_parser("run-dir", help="create/print an isolated run directory under the skill cache")
+    run_dir.add_argument("--project", default="cos-cdn-setup")
+    run_dir.add_argument("--env", default="run")
+    run_dir.add_argument("--create", action="store_true", help="create the directory before printing it")
+
     plan = sub.add_parser("plan", help="generate a plan from config")
     plan.add_argument("config")
-    plan.add_argument("--out", default="plan.json")
+    plan.add_argument("--out")
     plan.add_argument("--report")
 
     render = sub.add_parser("render-policy", help="render only the CAM policy JSON")
@@ -111,6 +116,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         if args.command == "init-config":
             return cmd_init_config(args)
+        if args.command == "run-dir":
+            return cmd_run_dir(args)
         if args.command == "plan":
             return cmd_plan(args)
         if args.command == "render-policy":
@@ -138,11 +145,24 @@ def cmd_init_config(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_run_dir(args: argparse.Namespace) -> int:
+    path = default_run_dir(args.project, args.env)
+    if args.create:
+        path.mkdir(parents=True, exist_ok=True)
+    print(path)
+    return 0
+
+
 def cmd_plan(args: argparse.Namespace) -> int:
     config = load_config(Path(args.config))
     plan = build_plan(config)
-    write_json(Path(args.out), plan)
-    print(f"wrote {args.out}")
+    out_path = Path(args.out) if args.out else default_run_dir(
+        str(plan.get("config", {}).get("project") or "cos-cdn-setup"),
+        str(plan.get("config", {}).get("env") or "run"),
+    ) / "plan.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    write_json(out_path, plan)
+    print(f"wrote {out_path}")
     if args.report:
         Path(args.report).write_text(render_report(plan), encoding="utf-8")
         print(f"wrote {args.report}")
@@ -225,7 +245,8 @@ def cmd_verify(args: argparse.Namespace) -> int:
     results = verify_plan(plan, timeout=args.timeout)
     state_path = default_state_path(plan_path)
     state = load_state(state_path) if state_path.exists() else None
-    output = render_verify_report(plan, results, state)
+    secrets_file = default_secrets_path(plan_path)
+    output = render_verify_report(plan, results, state, secrets_file if secrets_file.exists() else None)
     if args.report:
         Path(args.report).write_text(output, encoding="utf-8")
         print(f"wrote {args.report}")
@@ -607,6 +628,17 @@ def skill_cache_dir() -> Path:
     else:
         base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
     return base / "tencent-cos-cdn-setup-skill"
+
+
+def default_run_dir(project: str, env: str) -> Path:
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    return skill_cache_dir() / "runs" / f"{safe_slug(project)}-{safe_slug(env)}-{stamp}"
+
+
+def safe_slug(value: str) -> str:
+    compact = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip().lower())
+    compact = compact.strip("-._")
+    return compact[:64] or "run"
 
 
 def venv_python(venv_dir: Path) -> Path:
@@ -1093,6 +1125,8 @@ def render_report(plan: Json) -> str:
         "",
         render_human_plan_summary(plan),
         "",
+        render_integration_values(plan, None),
+        "",
         render_manual_section(plan, None, None),
         "",
         render_acceptance_section(plan, None),
@@ -1105,7 +1139,7 @@ def render_report(plan: Json) -> str:
         "",
         "## Technical Details",
         "",
-        "Detailed machine-readable actions are in `plan.json`. Most users only need the manual items and acceptance checklist above.",
+        "Detailed machine-readable actions are in the generated plan file. Most users only need the integration values, manual items, and acceptance checklist above.",
         "",
     ]
     return "\n".join(lines)
@@ -1135,6 +1169,8 @@ def render_apply_report(plan: Json, state: Json, secrets_file: Path) -> str:
         "",
         render_human_plan_summary(plan),
         "",
+        render_integration_values(plan, secrets_file),
+        "",
         render_manual_section(plan, state, secrets_file),
         "",
         render_acceptance_section(plan, state),
@@ -1150,17 +1186,58 @@ def render_manual_section(plan: Json, state: Optional[Json], secrets_file: Optio
     lines = [
         "## 必须手动完成 / Must Do Manually",
         "",
-        "| 事项 | 入口链接 | 搜索关键词 | 应检查字段 | 当前状态 | 是否完成 | 未完成原因 | 操作链路 |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| 事项 | 是否必做 | 入口链接 | 点击路径/要做什么 | 搜索关键词 | 应检查字段 | 当前状态 | 是否完成 | 未完成原因 |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     items = manual_checklist(plan, state, secrets_file)
     if not items:
-        lines.append("| 无 | - | - | - | - | 是 | - | - |")
+        lines.append("| 无 | - | - | - | - | - | - | 是 | - |")
     for item in items:
         lines.append(
-            f"| {item['title']} | {item['console']} | `{item['search']}` | {item['check']} | "
-            f"{item['current']} | {item['done']} | {item['reason']} | {item['action']} |"
+            f"| {item['title']} | {item['required']} | {item['console']} | {item['action']} | `{item['search']}` | "
+            f"{item['check']} | {item['current']} | {item['done']} | {item['reason']} |"
         )
+    return "\n".join(lines)
+
+
+def render_integration_values(plan: Json, secrets_file: Optional[Path]) -> str:
+    cfg = plan.get("config", {})
+    cdn = cfg.get("cdn", {})
+    cors = cfg.get("cors", {})
+    lines = [
+        "## 项目需要使用的配置数据 / Project Integration Values",
+        "",
+        "把下面这些值填到项目自己的配置系统里。不要把 SecretKey、TypeA key 明文提交到代码仓库。",
+        "",
+        "| 配置项 | 值 | 说明 |",
+        "| --- | --- | --- |",
+        f"| Tencent region | `{cfg.get('region', '')}` | COS bucket 所在地域。 |",
+        f"| Tencent APPID | `{cfg.get('appid', '')}` | bucket 名和 COS 资源 ARN 会用到。 |",
+    ]
+    for bucket in plan.get("buckets", []):
+        lines.append(f"| COS {bucket['kind']} bucket | `{bucket['name']}` | {bucket['kind']} 文件使用的 bucket。 |")
+        lines.append(f"| COS {bucket['kind']} origin | `{bucket.get('origin') or cos_origin(bucket['name'], cfg.get('region', ''))}` | CDN 回源域名，一般只给后端/运维使用。 |")
+    if cdn.get("enabled"):
+        if cdn.get("public_domain"):
+            lines.append(f"| Public CDN domain | `{cdn.get('public_domain')}` | 公开文件访问域名。 |")
+        if cdn.get("private_domain"):
+            lines.append(f"| Private CDN domain | `{cdn.get('private_domain')}` | 私有文件签名访问域名。 |")
+        private_auth = cdn.get("private_auth") or {}
+        if private_auth:
+            key_ref = str(secrets_file) if secrets_file else "generated plan.secrets.json after apply"
+            lines.append(f"| Private CDN TypeA key | `{private_auth.get('key_env', 'TENCENT_CDN_AUTH_KEY')}` / `{key_ref}` | 必须保存到后端密钥系统，用于生成签名 URL；不要写进前端。 |")
+            lines.append(f"| Private CDN sign param | `{private_auth.get('sign_param', 'sign')}` | 后端生成签名 URL 时使用的参数名。 |")
+            lines.append(f"| Private CDN URL TTL | `{private_auth.get('ttl_seconds', 3600)}` | 签名 URL 有效期，单位秒。 |")
+    dns = cfg.get("dns", {})
+    if dns.get("enabled"):
+        lines.append(f"| DNS zone | `{dns.get('zone', '')}` | DNSPod 托管的主域名。 |")
+    origins = cors.get("origins") or []
+    if origins:
+        lines.append(f"| Browser CORS origins | `{', '.join(origins)}` | 允许浏览器直传/访问 COS 的前端来源。 |")
+    cam = cfg.get("cam", {})
+    if cam.get("user_name"):
+        lines.append(f"| App CAM user | `{cam.get('user_name')}` | 项目运行期可使用的最小权限子用户；若未创建 access key，需要在控制台按需创建。 |")
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -1168,13 +1245,13 @@ def render_acceptance_section(plan: Json, state: Optional[Json], verify_results:
     lines = [
         "## 用户验收清单 / User Acceptance Checklist",
         "",
-        "| 资源 | 控制台入口 | 搜索关键词 | 应检查字段 | 当前 API/验证状态 | 是否完成 | 未完成原因 | 操作链路 |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| 资源 | 是否必做 | 控制台入口 | 点击路径/要做什么 | 搜索关键词 | 应检查字段 | 当前 API/验证状态 | 是否完成 | 未完成原因 |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for item in acceptance_checklist(plan, state, verify_results):
         lines.append(
-            f"| {item['resource']} | {item['console']} | `{item['search']}` | {item['check']} | "
-            f"{item['current']} | {item['done']} | {item['reason']} | {item['action']} |"
+            f"| {item['resource']} | {item['required']} | {item['console']} | {item['action']} | `{item['search']}` | "
+            f"{item['check']} | {item['current']} | {item['done']} | {item['reason']} |"
         )
     return "\n".join(lines)
 
@@ -1187,6 +1264,7 @@ def manual_checklist(plan: Json, state: Optional[Json] = None, secrets_file: Opt
             current, done, reason = manual_status(action_obj, state)
             items.append({
                 "title": "私有 CDN 必须确认 COS 私有回源授权",
+                "required": "必做",
                 "console": md_link("COS Bucket", CONSOLE_LINKS["cos_buckets"]),
                 "search": params.get("bucket", ""),
                 "check": "Domain and Transmission > Custom CDN acceleration domain; confirm COS private access / CDN service authorization.",
@@ -1202,6 +1280,7 @@ def manual_checklist(plan: Json, state: Optional[Json] = None, secrets_file: Opt
         current = "generated in local secrets file" if secrets_file and secrets_file.exists() else action_status_text([action_state(state, private_auth)])
         items.append({
             "title": "保存 private CDN TypeA key 到后端密钥系统",
+            "required": "必做",
             "console": "Local file only",
             "search": params.get("domain", ""),
             "check": "The key must be 6-32 letters/digits and must match the backend config that generates signed URLs.",
@@ -1214,6 +1293,7 @@ def manual_checklist(plan: Json, state: Optional[Json] = None, secrets_file: Opt
         cdn_domains = [a.get("params", {}).get("domain", "") for a in plan.get("actions", []) if a.get("kind") == "cdn.add_domain"]
         items.append({
             "title": "HTTPS 证书未由本 skill 配置",
+            "required": "按需；需要 HTTPS URL 时必做",
             "console": md_link("CDN Domains", CONSOLE_LINKS["cdn_domains"]),
             "search": ", ".join(filter(None, cdn_domains)) or "public/private CDN domains",
             "check": "HTTPS Configuration tab; HTTPS switch and certificate status.",
@@ -1224,6 +1304,7 @@ def manual_checklist(plan: Json, state: Optional[Json] = None, secrets_file: Opt
         })
     items.append({
         "title": "验收后清理临时 installer 权限",
+        "required": "必做",
         "console": md_link("CAM Users", CONSOLE_LINKS["cam_users"]),
         "search": "cos-skill-installer-test or the installer CAM user",
         "check": "AdministratorAccess / temporary access key.",
@@ -1242,6 +1323,7 @@ def acceptance_checklist(plan: Json, state: Optional[Json] = None, verify_result
         current, done, reason = aggregate_status(states, state)
         items.append({
             "resource": f"COS bucket {bucket['name']}",
+            "required": "必做",
             "console": md_link("COS Bucket", CONSOLE_LINKS["cos_buckets"]),
             "search": bucket["name"],
             "check": "Bucket exists; ACL; CORS rules",
@@ -1257,6 +1339,7 @@ def acceptance_checklist(plan: Json, state: Optional[Json] = None, verify_result
         current, done, reason = aggregate_status(states, state)
         items.append({
             "resource": f"CAM user {cam_user}",
+            "required": "必做",
             "console": md_link("CAM Users", CONSOLE_LINKS["cam_users"]),
             "search": cam_user,
             "check": "User exists; console login disabled unless intentionally enabled; API access matches plan.",
@@ -1271,6 +1354,7 @@ def acceptance_checklist(plan: Json, state: Optional[Json] = None, verify_result
         current, done, reason = aggregate_status(states, state)
         items.append({
             "resource": "CAM app policy",
+            "required": "必做",
             "console": md_link("CAM Policies", CONSOLE_LINKS["cam_policies"]),
             "search": cam_policy,
             "check": "Policy exists; resource ARNs only include planned buckets",
@@ -1291,6 +1375,7 @@ def acceptance_checklist(plan: Json, state: Optional[Json] = None, verify_result
                 current = f"{current}; verify: {verify_current}"
             items.append({
                 "resource": f"CDN domain {domain}",
+                "required": "CDN enabled 时必做",
                 "console": md_link("CDN Domains", CONSOLE_LINKS["cdn_domains"]),
                 "search": domain,
                 "check": "Status; origin domain; HTTPS switch",
@@ -1308,6 +1393,7 @@ def acceptance_checklist(plan: Json, state: Optional[Json] = None, verify_result
                 current = f"{current}; verify: {verify_current}"
             items.append({
                 "resource": f"DNSPod CNAME {fqdn}",
+                "required": "DNSPod enabled 时必做",
                 "console": md_link("DNSPod", CONSOLE_LINKS["dnspod"]),
                 "search": fqdn,
                 "check": "Record type CNAME; value points to Tencent CDN CNAME",
@@ -1319,13 +1405,15 @@ def acceptance_checklist(plan: Json, state: Optional[Json] = None, verify_result
     return items
 
 
-def render_verify_report(plan: Json, results: List[Json], state: Optional[Json] = None) -> str:
+def render_verify_report(plan: Json, results: List[Json], state: Optional[Json] = None, secrets_file: Optional[Path] = None) -> str:
     lines = ["# Tencent COS/CDN Verification", ""]
     lines.append(f"Generated for {len(plan.get('actions', []))} planned actions.")
     lines.append("")
     for result in results:
         lines.append(f"- {result['status'].upper()} {result['check']}: {result['detail']}")
     lines.extend([
+        "",
+        render_integration_values(plan, secrets_file),
         "",
         render_manual_section(plan, state, None),
         "",

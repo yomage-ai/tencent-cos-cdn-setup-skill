@@ -7,11 +7,11 @@ Always run `plan` first. Run `apply` without `--apply` to inspect the exact acti
 For real apply, prefer:
 
 ```bash
-python3 scripts/tencent_cos_cdn.py apply plan.json --apply --stop-on-failure
-python3 scripts/tencent_cos_cdn.py resume plan.json --apply
+python3 scripts/tencent_cos_cdn.py apply "$RUN_DIR/plan.json" --apply --stop-on-failure
+python3 scripts/tencent_cos_cdn.py resume "$RUN_DIR/plan.json" --apply
 ```
 
-The state file prevents successful actions from being repeated during resume.
+Use a run directory outside the user's project repository. The state file in that run directory prevents successful actions from being repeated during resume.
 
 ## Secrets
 
