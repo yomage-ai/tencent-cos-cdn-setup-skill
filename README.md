@@ -37,17 +37,11 @@ $skill-installer install https://github.com/yomage-ai/tencent-cos-cdn-setup-skil
 Use $tencent-cos-cdn-setup-skill to plan Tencent COS + CDN + DNSPod setup for my app.
 ```
 
-接下来你只需要按 Codex 的问题回答。你大概率会被问到这些：
+接下来你只需要按 Codex 的问题回答。第一轮通常只会问这三个：
 
-- 项目叫什么名字？
 - 这是测试环境还是生产环境？
-- 你的腾讯云 APPID 是多少？
-- 你有没有自己的域名？
-- 域名是不是在 DNSPod 管理？
 - 你的项目需要公开文件、私有文件，还是两种都要？
-- 前端访问地址是什么？
-- 你是否允许我先生成计划？
-- 你是否确认执行真实腾讯云配置？
+- 有没有已经放在 DNSPod 管理的域名？
 
 如果你不知道，就直接回答：
 
@@ -55,13 +49,41 @@ Use $tencent-cos-cdn-setup-skill to plan Tencent COS + CDN + DNSPod setup for my
 不知道，你帮我推荐一个默认值。
 ```
 
+后面只有到了需要真实配置腾讯云时，Codex 才会让你准备腾讯云访问密钥。
+
+### 如果 Codex 让你创建腾讯云子用户
+
+这是为了让 Codex 可以调用腾讯云 API 自动创建测试资源。小白测试时按下面选：
+
+1. 打开腾讯云控制台。
+2. 进入 **访问管理 CAM**。
+3. 进入 **用户 > 用户列表**。
+4. 点击 **新建用户**。
+5. 创建方式选 **自定义创建**。
+6. 用户类型选普通的 **可访问资源并接收消息** 子用户。
+7. 用户名填：`cos-skill-installer-test`。
+8. 访问方式：
+   - 勾选 **编程访问 / API 访问 / 访问密钥**。
+   - 不要勾选控制台登录，除非页面强制要求。
+   - 登录密码、重置密码、MFA 等登录相关配置保持默认。
+9. 用户权限：
+   - 只做测试验收时，可以临时绑定 **AdministratorAccess**。
+   - 这个权限很大，只适合临时测试；测试完成后删除这个子用户或禁用密钥。
+   - 正式公司环境不要长期使用这个权限，应让管理员提供临时安装密钥。
+10. 用户标签：跳过或保持默认。
+11. 审阅后点击完成。
+12. 进入这个子用户详情，打开 **API 密钥 / 访问密钥**。
+13. 创建密钥，复制 `SecretId` 和 `SecretKey`。
+
+注意：`SecretKey` 通常只在创建时显示一次。复制后不要发到群里、截图里，也不要提交到代码仓库。
+
 ### 你需要准备什么
 
 最少准备这些：
 
 - 一个腾讯云账号。
-- 一个可以操作腾讯云资源的 SecretId / SecretKey。
-- 如果要配置 CDN 域名，最好有一个已经放在 DNSPod 里的域名。
+- 到真实执行时，再准备一个临时测试用 SecretId / SecretKey。
+- 如果要测试 CDN 域名，最好有一个已经放在 DNSPod 里的域名。
 
 如果你没有域名，也可以先让 Codex 只规划 COS bucket 和权限，不配置 CDN/DNS。
 
@@ -140,15 +162,9 @@ Use $tencent-cos-cdn-setup-skill to plan Tencent COS + CDN + DNSPod setup for my
 
 Codex should then guide you with questions such as:
 
-- What is the project name?
 - Is this for dev, staging, or production?
-- What is your Tencent Cloud APPID?
-- Do you have a domain name?
-- Is the domain hosted in DNSPod?
 - Does your app need public files, private files, or both?
-- What frontend origins should access these files?
-- Should I generate a plan now?
-- Do you confirm applying real Tencent Cloud changes?
+- Do you already have a DNSPod-hosted domain?
 
 If you do not know an answer, say:
 
@@ -156,12 +172,41 @@ If you do not know an answer, say:
 I don't know. Please recommend a default.
 ```
 
+Codex should ask for Tencent Cloud credentials only when it is time to apply real cloud changes.
+
+### If Codex Asks You To Create A Tencent Cloud Sub-user
+
+This lets Codex call Tencent Cloud APIs to create test resources. For a beginner smoke test:
+
+1. Open Tencent Cloud Console.
+2. Go to **Access Management (CAM)**.
+3. Open **Users > User List**.
+4. Click **Create User** / **New User**.
+5. Choose **Custom creation**.
+6. User type: choose the normal sub-user type that can access resources and receive messages.
+7. User name: `cos-skill-installer-test`.
+8. Access method:
+   - Enable **Programming access**, **API access**, or **Access key**.
+   - Do not enable console login unless the page requires it.
+   - Keep login password, password reset, and MFA settings at their defaults if console login is disabled.
+9. User permissions:
+   - For a smoke test, temporarily attach **AdministratorAccess**.
+   - This is broad permission and should only be used for temporary testing.
+   - Delete this sub-user or disable the key after testing.
+   - For company production use, ask an administrator for a temporary installer key instead.
+10. Tags: skip or keep defaults.
+11. Review and finish.
+12. Open the new sub-user details, then open **API Key** / **Access Key**.
+13. Create a key and copy `SecretId` and `SecretKey`.
+
+Important: `SecretKey` is usually shown only once when the key is created. Do not post it in chat, screenshots, or code repositories.
+
 ### What You Need
 
 At minimum:
 
 - A Tencent Cloud account.
-- A SecretId / SecretKey with enough permission to manage test resources.
+- A temporary test SecretId / SecretKey when you are ready to apply real changes.
 - A DNSPod-hosted domain if you want CDN domain setup.
 
 If you do not have a domain yet, Codex can plan COS buckets and permissions first, then leave CDN/DNS for later.

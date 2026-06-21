@@ -40,6 +40,19 @@ Without `--apply`, `apply` is a dry run.
 python scripts/tencent_cos_cdn.py verify plan.json --report verify.md
 ```
 
+## Beginner Guidance
+
+Read `references/beginner-flow.md` before guiding a beginner, a smoke test, or a user who says they do not know Tencent Cloud configuration.
+
+Follow these rules:
+
+- Tell the user only the current next action. Do not show the full technical plan unless they ask.
+- Do not show raw `export ...` commands, SDK names, JSON schema, or long command output to beginners.
+- Treat `SecretId`, `SecretKey`, and CDN TypeA keys as credentials. Explain where to copy them from, but avoid displaying their values.
+- If Tencent Cloud credentials are missing, guide the user through creating a temporary installer sub-user first.
+- Use temporary broad permissions only for smoke testing, and tell the user to delete or disable the temporary key after testing.
+- After collecting answers, say what will be created in plain language, then ask whether to generate the plan.
+
 ## Guided Questions
 
 Use questions like these for beginners:
@@ -58,6 +71,14 @@ If the user has no domain, plan COS and CAM first and leave CDN/DNS disabled or 
 
 If the user only wants a test run, recommend a non-production environment name and test-only resource names.
 
+For the first message after invocation, ask only:
+
+1. Is this a test or production setup?
+2. Does the app need public files, private files, or both?
+3. Do you already have a domain managed in DNSPod?
+
+Infer the project name from the folder if the user does not care.
+
 ## Safety Rules
 
 - Treat Tencent Cloud Console state as production state. Generate and review a plan before changing anything.
@@ -74,6 +95,7 @@ Read `references/safety-rules.md` before applying changes to a real Tencent Clou
 - `scripts/tencent_cos_cdn.py`: the semi-automated planner, applier, verifier, and config template generator.
 - `references/config-schema.md`: config file schema and examples.
 - `references/capability-map.md`: what the script automates, what remains manual, and which Tencent Cloud APIs are involved.
+- `references/beginner-flow.md`: minimal beginner-facing flow and Tencent Cloud console steps.
 - `references/safety-rules.md`: credential, dry-run, DNS, CAM, and CDN safety guidance.
 - `references/troubleshooting.md`: operational failure modes for COS/CDN/DNSPod setup.
 
