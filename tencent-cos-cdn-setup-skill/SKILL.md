@@ -5,20 +5,26 @@ description: Plan, configure, and verify Tencent Cloud standard COS + CDN + DNSP
 
 # Tencent COS/CDN Setup
 
-Use this skill to build or audit a Tencent Cloud standard COS delivery stack. Prefer the bundled script for deterministic planning, cloud changes, and validation.
+Use this skill to build or audit a Tencent Cloud standard COS delivery stack. Prefer guided questions for users who are not familiar with cloud storage terms, and prefer the bundled script for deterministic planning, cloud changes, and validation.
 
 ## Workflow
 
-1. Collect the project parameters: project name, environment, region, APPID, mode (`public-only`, `private-only`, or `public-private`), bucket names, domains, DNSPod zone, CORS origins, and private CDN TTL.
-2. Read `references/config-schema.md` when creating or reviewing a config file.
-3. Run:
+1. Start in guided mode unless the user already provides a config file. Ask one to three simple questions at a time. Do not dump the full schema on the user.
+2. If the user does not know an answer, propose a safe default and explain the tradeoff in one short sentence.
+3. Collect the minimum project parameters: project name, environment, Tencent Cloud APPID, region, whether a domain exists, whether DNSPod manages that domain, and whether the app needs public files, private files, or both.
+4. Infer the setup mode:
+   - Public images/files only -> `public-only`
+   - Private downloads only -> `private-only`
+   - Both public and private files -> `public-private`
+5. Read `references/config-schema.md` when creating or reviewing a config file.
+6. Generate a plan before applying any real Tencent Cloud change:
 
 ```bash
 python scripts/tencent_cos_cdn.py plan config.json --out plan.json --report report.md
 ```
 
-4. Review the generated plan. Check CAM resources, CDN domains, DNS records, and warnings before applying.
-5. For real cloud changes, export Tencent Cloud credentials and run:
+7. Summarize the plan in plain language for the user. Mention what will be created and what will remain manual.
+8. Ask for explicit confirmation before applying real changes. For real cloud changes, export Tencent Cloud credentials and run:
 
 ```bash
 export TENCENTCLOUD_SECRET_ID="..."
@@ -28,11 +34,29 @@ python scripts/tencent_cos_cdn.py apply plan.json --apply
 
 Without `--apply`, `apply` is a dry run.
 
-6. Verify DNS/CDN behavior:
+9. Verify DNS/CDN behavior:
 
 ```bash
 python scripts/tencent_cos_cdn.py verify plan.json --report verify.md
 ```
+
+## Guided Questions
+
+Use questions like these for beginners:
+
+- What is the project name? If unsure, use a short lowercase name based on the folder name.
+- Is this for development, testing, staging, or production?
+- What is the Tencent Cloud APPID? If unknown, tell the user where to find it in Tencent Cloud account info.
+- Does the app need public files, private files, or both?
+- Do you already have a domain name for file access?
+- Is that domain managed in DNSPod?
+- What website/app origins should access files in the browser?
+- Do you want me to generate a plan now?
+- Do you confirm applying real Tencent Cloud changes?
+
+If the user has no domain, plan COS and CAM first and leave CDN/DNS disabled or marked for later.
+
+If the user only wants a test run, recommend a non-production environment name and test-only resource names.
 
 ## Safety Rules
 
