@@ -1,0 +1,23 @@
+{
+  "name": "tencent-cos-cdn-setup-skill",
+  "version": "0.1.0",
+  "description": "Install the Tencent COS/CDN setup Codex skill.",
+  "bin": "./bin/install.js",
+  "files": [
+    "bin/",
+    "tencent-cos-cdn-setup-skill/",
+    "README.md"
+  ],
+  "keywords": [
+    "codex",
+    "skill",
+    "tencent",
+    "cos",
+    "cdn",
+    "dnspod"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=16"
+  }
+}

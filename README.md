@@ -15,13 +15,19 @@
 
 ### 安装
 
-在 Codex 里说：
+在终端执行：
 
-```text
-$skill-installer install https://github.com/yomage-ai/tencent-cos-cdn-setup-skill/tree/main/tencent-cos-cdn-setup-skill
+```bash
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill
 ```
 
 安装完成后，重启 Codex，让新 skill 生效。
+
+如果已经安装过旧版本，想强制覆盖：
+
+```bash
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill --force
+```
 
 ### 小白使用方式
 
@@ -31,10 +37,20 @@ $skill-installer install https://github.com/yomage-ai/tencent-cos-cdn-setup-skil
 我的项目-cos配置测试
 ```
 
-然后在这个文件夹里打开 Codex，说：
+然后在这个文件夹里打开 Codex，直接说类似这样的话就可以：
 
 ```text
-Use $tencent-cos-cdn-setup-skill to plan Tencent COS + CDN + DNSPod setup for my app.
+帮我配置腾讯云的对象存储相关配置
+```
+
+也可以说：
+
+```text
+帮我的项目接入腾讯云 COS 和 CDN
+```
+
+```text
+帮我配置腾讯云 COS、CDN、DNSPod
 ```
 
 接下来你只需要按 Codex 的问题回答。第一轮通常只会问这三个：
@@ -147,6 +163,14 @@ python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py resume plan.json 
 - `plan.state.json`：记录已经成功的动作，避免重复创建。
 - `plan.secrets.json`：如果自动生成了 private CDN TypeA key，会保存在这里。不要提交这个文件，要把 key 保存到你的后端密钥系统。
 
+### 备用安装方式
+
+如果你的环境不能使用 `npx`，也可以在 Codex 里使用系统自带的 `$skill-installer`：
+
+```text
+$skill-installer install https://github.com/yomage-ai/tencent-cos-cdn-setup-skill/tree/main/tencent-cos-cdn-setup-skill
+```
+
 ## English
 
 This is a Codex skill for setting up Tencent Cloud standard COS, CDN, DNSPod, and CAM permissions for an application.
@@ -162,20 +186,36 @@ You do not need to understand COS, CDN, DNSPod, or CAM before using it. The inte
 
 ### Install
 
-Ask Codex:
+Run this in your terminal:
 
-```text
-$skill-installer install https://github.com/yomage-ai/tencent-cos-cdn-setup-skill/tree/main/tencent-cos-cdn-setup-skill
+```bash
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill
 ```
 
 Restart Codex after installation.
 
+To replace an old installation:
+
+```bash
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill --force
+```
+
 ### Beginner Flow
 
-Create a fresh folder, then open Codex in that folder and say:
+Create a fresh folder, then open Codex in that folder and say something natural:
 
 ```text
-Use $tencent-cos-cdn-setup-skill to plan Tencent COS + CDN + DNSPod setup for my app.
+Help me configure Tencent Cloud object storage for my app.
+```
+
+Other examples:
+
+```text
+Help my project use Tencent COS and CDN.
+```
+
+```text
+帮我配置腾讯云的对象存储相关配置
 ```
 
 Codex should then guide you with questions such as:
@@ -278,3 +318,11 @@ Generated local files:
 
 - `plan.state.json`: completed action state, used for resume.
 - `plan.secrets.json`: generated private CDN TypeA keys, if any. Do not commit it; store the key in your backend secret manager.
+
+### Alternative Install
+
+If `npx` is not available, use Codex's built-in `$skill-installer`:
+
+```text
+$skill-installer install https://github.com/yomage-ai/tencent-cos-cdn-setup-skill/tree/main/tencent-cos-cdn-setup-skill
+```

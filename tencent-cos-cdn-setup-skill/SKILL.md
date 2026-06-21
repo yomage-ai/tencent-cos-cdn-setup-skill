@@ -1,6 +1,6 @@
 ---
 name: tencent-cos-cdn-setup-skill
-description: Plan, configure, and verify Tencent Cloud standard COS + CDN + DNSPod delivery setups. Use when Codex needs to create or reuse Tencent COS buckets, configure CORS, generate and attach least-privilege CAM policies, add CDN acceleration domains, configure private CDN TypeA authentication, create DNSPod CNAME records, or produce dry-run/apply/verification reports for public-only, private-only, or public-private object storage delivery.
+description: Plan, configure, and verify Tencent Cloud standard COS + CDN + DNSPod delivery setups. Use when the user asks in English or Chinese to configure Tencent Cloud object storage, 腾讯云对象存储, 腾讯云 COS, COS/CDN, CDN 加速域名, DNSPod 解析, 腾讯云后台配置, 对象存储相关配置, 对象存储相关的配置, 帮我配置腾讯云对象存储, 帮我配置腾讯云的对象存储相关配置, file upload/download storage, public/private buckets, CORS, CAM permissions, CDN TypeA authentication, or end-to-end dry-run/apply/verification for public-only, private-only, or public-private object storage delivery.
 ---
 
 # Tencent COS/CDN Setup
