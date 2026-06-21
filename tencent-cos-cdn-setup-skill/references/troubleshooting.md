@@ -2,9 +2,8 @@
 
 ## Setup Fails Before Cloud Calls
 
-- Missing `tencentcloud-sdk-python`: install it with `python3 -m pip install tencentcloud-sdk-python`.
-- Missing COS SDK: install it with `python3 -m pip install cos-python-sdk-v5`.
-- On macOS, use `python3 -m pip ...`; if Homebrew blocks global installs, create a virtual environment.
+- Missing Tencent Cloud SDK dependencies: the script should automatically create an isolated runtime under the user cache and install them there.
+- If isolated runtime setup fails, check network access to PyPI or set `TENCENT_COS_CDN_SKILL_CACHE` to a writable cache directory and rerun.
 - YAML config fails to load: install `PyYAML` or use JSON.
 - Missing credentials: export `TENCENTCLOUD_SECRET_ID` and `TENCENTCLOUD_SECRET_KEY`.
 

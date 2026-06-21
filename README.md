@@ -71,25 +71,24 @@ npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill --force
 
 这是为了让 Codex 可以调用腾讯云 API 自动创建测试资源。小白测试时按下面选：
 
-1. 打开腾讯云控制台。
-2. 进入 **访问管理 CAM**。
-3. 进入 **用户 > 用户列表**。
-4. 点击 **新建用户**。
-5. 创建方式选 **自定义创建**。
-6. 用户类型选普通的 **可访问资源并接收消息** 子用户。
-7. 用户名填：`cos-skill-installer-test`。
-8. 访问方式：
+1. 打开 [CAM 用户列表](https://console.cloud.tencent.com/cam/user)。
+2. 如果页面没有直接进入用户列表，点击 **用户 > 用户列表**。
+3. 点击 **新建用户**。
+4. 创建方式选 **自定义创建**。
+5. 用户类型选普通的 **可访问资源并接收消息** 子用户。
+6. 用户名填：`cos-skill-installer-test`。
+7. 访问方式：
    - 勾选 **编程访问 / API 访问 / 访问密钥**。
    - 不要勾选控制台登录，除非页面强制要求。
    - 登录密码、重置密码、MFA 等登录相关配置保持默认。
-9. 用户权限：
+8. 用户权限：
    - 只做本 skill 的测试验收时，直接临时绑定 **AdministratorAccess**。
    - 这个权限很大，只适合临时测试；测试完成后删除这个子用户或禁用密钥。
    - 正式公司环境不要长期使用这个权限，应让管理员提供临时安装密钥。
-10. 用户标签：跳过或保持默认。
-11. 审阅后点击完成。
-12. 进入这个子用户详情，打开 **API 密钥 / 访问密钥**。
-13. 创建密钥，复制 `SecretId` 和 `SecretKey`。
+9. 用户标签：跳过或保持默认。
+10. 审阅后点击完成。
+11. 进入这个子用户详情，打开 **API 密钥 / 访问密钥**。
+12. 创建密钥，复制 `SecretId` 和 `SecretKey`。
 
 注意：`SecretKey` 通常只在创建时显示一次。复制后不要发到群里、截图里，也不要提交到代码仓库。
 
@@ -130,7 +129,7 @@ Codex 第一步只会生成计划，不应该直接修改腾讯云。
 - 一份配置计划。
 - 一份腾讯云资源清单。
 - 一份待执行动作清单。
-- 一份验证结果。
+- 一份执行/验证后的用户验收清单，包含控制台链接、搜索关键词、检查字段、当前状态、是否完成和未完成原因。
 - 必要时，一份你项目里可以参考的对象存储配置片段。
 
 ### 给懂命令行的人
@@ -145,11 +144,7 @@ python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py apply plan.json
 
 不带 `--apply` 时，`apply` 只是 dry-run，不会改腾讯云。
 
-真实执行前请先安装依赖：
-
-```bash
-python3 -m pip install tencentcloud-sdk-python cos-python-sdk-v5
-```
+真实执行时，如果缺少腾讯云 Python SDK，脚本会自动在用户缓存目录创建隔离运行环境并安装依赖，不会污染你的项目 Python 环境。
 
 真实执行建议这样跑，失败时会停下来，修好后可以继续：
 
@@ -162,6 +157,7 @@ python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py resume plan.json 
 
 - `plan.state.json`：记录已经成功的动作，避免重复创建。
 - `plan.secrets.json`：如果自动生成了 private CDN TypeA key，会保存在这里。不要提交这个文件，要把 key 保存到你的后端密钥系统。
+- `plan.apply-report.md`：执行后的用户验收清单和必须手动完成事项。
 
 ### 备用安装方式
 
@@ -236,26 +232,25 @@ Codex should ask for Tencent Cloud credentials only when it is time to apply rea
 
 This lets Codex call Tencent Cloud APIs to create test resources. For a beginner smoke test:
 
-1. Open Tencent Cloud Console.
-2. Go to **Access Management (CAM)**.
-3. Open **Users > User List**.
-4. Click **Create User** / **New User**.
-5. Choose **Custom creation**.
-6. User type: choose the normal sub-user type that can access resources and receive messages.
-7. User name: `cos-skill-installer-test`.
-8. Access method:
+1. Open [CAM Users](https://console.cloud.tencent.com/cam/user).
+2. If needed, click **Users > User List**.
+3. Click **Create User** / **New User**.
+4. Choose **Custom creation**.
+5. User type: choose the normal sub-user type that can access resources and receive messages.
+6. User name: `cos-skill-installer-test`.
+7. Access method:
    - Enable **Programming access**, **API access**, or **Access key**.
    - Do not enable console login unless the page requires it.
    - Keep login password, password reset, and MFA settings at their defaults if console login is disabled.
-9. User permissions:
+8. User permissions:
    - For this skill smoke test, temporarily attach **AdministratorAccess**.
    - This is broad permission and should only be used for temporary testing.
    - Delete this sub-user or disable the key after testing.
    - For company production use, ask an administrator for a temporary installer key instead.
-10. Tags: skip or keep defaults.
-11. Review and finish.
-12. Open the new sub-user details, then open **API Key** / **Access Key**.
-13. Create a key and copy `SecretId` and `SecretKey`.
+9. Tags: skip or keep defaults.
+10. Review and finish.
+11. Open the new sub-user details, then open **API Key** / **Access Key**.
+12. Create a key and copy `SecretId` and `SecretKey`.
 
 Important: `SecretKey` is usually shown only once when the key is created. Do not post it in chat, screenshots, or code repositories.
 
@@ -301,11 +296,7 @@ python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py apply plan.json
 
 Without `--apply`, `apply` is only a dry run and will not change Tencent Cloud.
 
-Install dependencies before real apply:
-
-```bash
-python3 -m pip install tencentcloud-sdk-python cos-python-sdk-v5
-```
+During real apply, the script auto-prepares an isolated Python runtime for Tencent Cloud SDK dependencies if needed. It does not install packages into your project Python environment.
 
 Recommended real apply flow:
 
@@ -318,6 +309,7 @@ Generated local files:
 
 - `plan.state.json`: completed action state, used for resume.
 - `plan.secrets.json`: generated private CDN TypeA keys, if any. Do not commit it; store the key in your backend secret manager.
+- `plan.apply-report.md`: post-apply acceptance checklist and required manual actions.
 
 ### Alternative Install
 

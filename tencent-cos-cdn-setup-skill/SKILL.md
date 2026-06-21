@@ -46,6 +46,8 @@ python3 scripts/tencent_cos_cdn.py resume plan.json --apply
 python3 scripts/tencent_cos_cdn.py verify plan.json --report verify.md
 ```
 
+After apply or verify, always point the user to the generated apply/verify report and summarize the top incomplete manual items. Do not end with only raw command output.
+
 ## Beginner Guidance
 
 Read `references/beginner-flow.md` before guiding a beginner, a smoke test, or a user who says they do not know Tencent Cloud configuration.
@@ -58,8 +60,30 @@ Follow these rules:
 - If Tencent Cloud credentials are missing, guide the user through creating a temporary installer sub-user first.
 - Use temporary broad permissions only for smoke testing, and tell the user to delete or disable the temporary key after testing.
 - After collecting answers, say what will be created in plain language, then ask whether to generate the plan.
-- Before real apply, ensure dependencies are installed. If missing, stop and tell the user to run `python3 -m pip install tencentcloud-sdk-python cos-python-sdk-v5`.
+- Do not ask beginners to install Python SDK dependencies. The bundled script auto-creates an isolated runtime in the user cache when SDKs are missing.
 - For private CDN, highlight that COS private origin authorization is mandatory and must be checked in the COS console even when the script tries to enable `CosPrivateAccess`.
+
+## User Operation Link Rule
+
+When the user must open Tencent Cloud or copy information from a console page, provide all of this in the same response:
+
+- Direct console URL.
+- Click path from the opened page.
+- Search keyword, such as the bucket, CDN domain, DNS zone, policy, or CAM user name.
+- Fields to check.
+- The exact action to take.
+- Whether the step is required or optional.
+
+Never say only "open Tencent Cloud Console", "go to CAM", or "check CDN". Use links such as:
+
+- CAM users: `https://console.cloud.tencent.com/cam/user`
+- CAM policies: `https://console.cloud.tencent.com/cam/policy`
+- COS buckets: `https://console.cloud.tencent.com/cos/bucket`
+- CDN domains: `https://console.cloud.tencent.com/cdn/domains`
+- DNSPod / DNS: `https://console.cloud.tencent.com/cns`
+- SSL certificates: `https://console.cloud.tencent.com/ssl`
+
+For beginner-facing replies, avoid exposing SDK names, pip commands, virtualenv details, JSON schema, or long command output unless the user asks.
 
 ## Guided Questions
 

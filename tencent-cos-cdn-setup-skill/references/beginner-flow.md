@@ -10,6 +10,8 @@ Use this reference when the user is not familiar with Tencent Cloud setup.
 - Explain Tencent Cloud terms only when needed for the current step.
 - Prefer "keep default" / "choose this option" instructions over conceptual explanations.
 - Do not show `export TENCENTCLOUD_SECRET_ID=...` to beginners. Say "I will use the credentials locally after you provide them."
+- Do not ask beginners to install Python packages or SDKs. Let the script prepare its isolated runtime automatically.
+- Whenever the user must operate in Tencent Cloud, include the direct URL, click path, search keyword, fields to check, and exact action in the same response.
 
 ## First Three Questions
 
@@ -33,9 +35,8 @@ The skill needs a temporary "installer credential" to call Tencent Cloud APIs. T
 
 For a beginner smoke test, guide the user through this:
 
-1. Open Tencent Cloud Console.
-2. Go to **Access Management (CAM)**.
-3. Open **Users > User List**.
+1. Open [CAM Users](https://console.cloud.tencent.com/cam/user).
+2. Click **Users > User List** if the page does not open there directly.
 4. Click **Create User** / **New User**.
 5. Choose **Custom creation**.
 6. User type: choose the normal sub-user type that can access resources and receive messages.
@@ -59,6 +60,12 @@ For a beginner smoke test, guide the user through this:
 Important: Tencent Cloud only shows `SecretKey` when the key is created. Tell the user to copy it immediately and store it safely.
 
 After the user provides credentials, do not echo them back.
+
+When asking the user for APPID, give the direct entry and what to copy:
+
+- Open [Tencent Cloud Account Info](https://console.cloud.tencent.com/developer).
+- Search/check field: **APPID**.
+- Action: copy only the numeric APPID, not SecretId or UIN.
 
 ## Domain Step
 
@@ -124,7 +131,17 @@ Show only:
 For private CDN, tell the user to check:
 
 ```text
-COS bucket > Domain and Transmission > Custom CDN acceleration domain
+Open https://console.cloud.tencent.com/cos/bucket -> search bucket -> click bucket -> Domain and Transmission -> Custom CDN acceleration domain
 ```
 
 If the console shows a CDN service authorization prompt, click the authorization button.
+
+## Final Response Shape
+
+After apply or verify, always give the user:
+
+- Link to the generated report file.
+- A short "Done / Not done yet" summary.
+- The top required manual actions with Tencent Cloud links and click paths.
+
+Do not finish with only "generated report.md" or raw command output.

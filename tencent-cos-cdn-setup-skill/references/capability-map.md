@@ -16,8 +16,9 @@ This skill is a semi-automated setup assistant for standard Tencent Cloud COS de
 - Enable CDN COS private origin access for private COS origins when supported by the CDN API.
 - Create or update DNSPod CNAME records with conflict protection.
 - Verify DNS resolution and HTTPS/HTTP response headers.
-- Preflight Python SDK dependencies before real apply.
+- Auto-prepare isolated Python SDK dependencies before real apply.
 - Persist apply state and resume after failed runs.
+- Generate plan/apply/verify reports with console links, search keywords, check fields, current status, completion state, incomplete reason, and manual action paths.
 
 ## Manual Or Confirmed Before Apply
 

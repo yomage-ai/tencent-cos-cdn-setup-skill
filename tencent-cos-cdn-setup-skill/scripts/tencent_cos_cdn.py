@@ -42,6 +42,19 @@ SECRET_KEYS.update({"secretid", "secret_id", "secretkey", "secret_key", "private
 TYPE_A_KEY_RE = re.compile(r"^[A-Za-z0-9]{6,32}$")
 TYPE_A_KEY_CHARS = string.ascii_letters + string.digits
 DEFAULT_DNSPOD_RECORD_LINE = "默认"
+AUTO_VENV_ENV = "TENCENT_COS_CDN_SKILL_AUTO_VENV"
+APPLY_DEPENDENCIES = {
+    "qcloud_cos": "cos-python-sdk-v5",
+    "tencentcloud": "tencentcloud-sdk-python",
+}
+CONSOLE_LINKS = {
+    "cos_buckets": "https://console.cloud.tencent.com/cos/bucket",
+    "cdn_domains": "https://console.cloud.tencent.com/cdn/domains",
+    "dnspod": "https://console.cloud.tencent.com/cns",
+    "cam_users": "https://console.cloud.tencent.com/cam/user",
+    "cam_policies": "https://console.cloud.tencent.com/cam/policy",
+    "ssl": "https://console.cloud.tencent.com/ssl",
+}
 
 
 class SkillError(Exception):
@@ -160,7 +173,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
         print("Dry run only. Re-run with --apply to perform these actions.")
         return 0
 
-    preflight_apply(plan)
+    ensure_apply_runtime(plan)
     creds = load_credentials()
     print("mode: apply")
     print(render_plan_summary(plan))
@@ -191,21 +204,28 @@ def cmd_apply(args: argparse.Namespace) -> int:
         detail = result.get("detail", "")
         print(f"  {status}{': ' + detail if detail else ''}")
         if status == "fail" and args.stop_on_failure:
+            report_path = write_apply_report(plan_path, plan, state, secrets_file)
             print(f"Stopped after first failure. Fix the issue and run: python3 {Path(__file__).name} resume {plan_path} --apply")
             print(f"State file: {state_path}")
+            print(f"Acceptance report: {report_path}")
             return 1
 
     print(json.dumps({"results": redact(results)}, indent=2, ensure_ascii=False))
     print(f"State file: {state_path}")
     if secrets_file.exists():
         print(f"Local secrets file: {secrets_file} (do not commit; save generated CDN TypeA keys to your backend secret store)")
+    report_path = write_apply_report(plan_path, plan, state, secrets_file)
+    print(f"Acceptance report: {report_path}")
     return 0
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
-    plan = load_config(Path(args.plan))
+    plan_path = Path(args.plan)
+    plan = load_config(plan_path)
     results = verify_plan(plan, timeout=args.timeout)
-    output = render_verify_report(plan, results)
+    state_path = default_state_path(plan_path)
+    state = load_state(state_path) if state_path.exists() else None
+    output = render_verify_report(plan, results, state)
     if args.report:
         Path(args.report).write_text(output, encoding="utf-8")
         print(f"wrote {args.report}")
@@ -533,20 +553,66 @@ class ApplyContext:
     cam_policy_id: Optional[int] = None
 
 
-def preflight_apply(plan: Json) -> None:
+def ensure_apply_runtime(plan: Json) -> None:
+    packages = missing_apply_packages(plan)
+    if not packages:
+        return
+    if os.environ.get(AUTO_VENV_ENV) == "1":
+        raise SkillError(
+            "isolated Python runtime was prepared, but required Tencent Cloud SDK packages are still missing. "
+            "Check network access to PyPI and retry."
+        )
+
+    venv_dir = skill_cache_dir() / "python-venv"
+    python = venv_python(venv_dir)
+    print("Preparing isolated Tencent Cloud SDK runtime. This is a one-time setup and does not modify your project Python.", flush=True)
+    try:
+        if not python.exists():
+            subprocess.check_call([sys.executable, "-m", "venv", str(venv_dir)])
+        subprocess.check_call([
+            str(python),
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            *packages,
+        ])
+    except subprocess.CalledProcessError as exc:
+        raise SkillError(
+            "failed to prepare isolated Tencent Cloud SDK runtime. "
+            "Check network access to PyPI and retry."
+        ) from exc
+
+    env = os.environ.copy()
+    env[AUTO_VENV_ENV] = "1"
+    os.execve(str(python), [str(python), str(Path(__file__).resolve()), *sys.argv[1:]], env)
+
+
+def missing_apply_packages(plan: Json) -> List[str]:
     missing: List[str] = []
     kinds = {action.get("kind", "") for action in plan.get("actions", [])}
     if any(kind.startswith("cos.") for kind in kinds) and importlib.util.find_spec("qcloud_cos") is None:
-        missing.append("cos-python-sdk-v5")
+        missing.append(APPLY_DEPENDENCIES["qcloud_cos"])
     if any(kind.startswith(("cam.", "cdn.", "dnspod.")) for kind in kinds) and importlib.util.find_spec("tencentcloud") is None:
-        missing.append("tencentcloud-sdk-python")
-    if missing:
-        packages = " ".join(sorted(set(missing)))
-        raise SkillError(
-            "missing Python dependencies. Install them first:\n"
-            f"python3 -m pip install {packages}\n"
-            "If your macOS Python blocks global installs, create a virtual environment and run the same command inside it."
-        )
+        missing.append(APPLY_DEPENDENCIES["tencentcloud"])
+    return sorted(set(missing))
+
+
+def skill_cache_dir() -> Path:
+    custom = os.environ.get("TENCENT_COS_CDN_SKILL_CACHE")
+    if custom:
+        return Path(custom).expanduser()
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    else:
+        base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    return base / "tencent-cos-cdn-setup-skill"
+
+
+def venv_python(venv_dir: Path) -> Path:
+    if sys.platform == "win32":
+        return venv_dir / "Scripts" / "python.exe"
+    return venv_dir / "bin" / "python"
 
 
 def default_state_path(plan_path: Path) -> Path:
@@ -643,7 +709,7 @@ def cos_client(ctx: ApplyContext, region: str):
     try:
         from qcloud_cos import CosConfig, CosS3Client
     except ImportError as exc:
-        raise SkillError("missing cos-python-sdk-v5; install with: python3 -m pip install cos-python-sdk-v5") from exc
+        raise SkillError("COS SDK is unavailable after isolated runtime setup. Retry apply; if it repeats, check network access to PyPI.") from exc
     config = CosConfig(Region=region, SecretId=ctx.creds.secret_id, SecretKey=ctx.creds.secret_key)
     return CosS3Client(config)
 
@@ -679,7 +745,7 @@ def tencent_client(ctx: ApplyContext, service: str):
         from tencentcloud.common.profile.client_profile import ClientProfile
         from tencentcloud.common.profile.http_profile import HttpProfile
     except ImportError as exc:
-        raise SkillError("missing tencentcloud-sdk-python; install with: python3 -m pip install tencentcloud-sdk-python") from exc
+        raise SkillError("Tencent Cloud SDK is unavailable after isolated runtime setup. Retry apply; if it repeats, check network access to PyPI.") from exc
 
     cred = credential.Credential(ctx.creds.secret_id, ctx.creds.secret_key)
     http_profile = HttpProfile()
@@ -1027,31 +1093,9 @@ def render_report(plan: Json) -> str:
         "",
         render_human_plan_summary(plan),
         "",
-        "## Must Do Manually",
+        render_manual_section(plan, None, None),
         "",
-    ]
-    manual_items = manual_checklist(plan)
-    if manual_items:
-        for item in manual_items:
-            lines.extend([
-                f"- **{item['title']}**",
-                f"  - Console: {item['console']}",
-                f"  - Search: `{item['search']}`",
-                f"  - Check: {item['check']}",
-                f"  - Action: {item['action']}",
-            ])
-    else:
-        lines.append("- No required manual steps detected in the plan.")
-    lines.extend([
-        "",
-        "## User Acceptance Checklist",
-        "",
-        "| Resource | Console | Search | Check fields | Expected status |",
-        "| --- | --- | --- | --- | --- |",
-    ])
-    for item in acceptance_checklist(plan):
-        lines.append(f"| {item['resource']} | {item['console']} | `{item['search']}` | {item['check']} | {item['expected']} |")
-    lines.extend([
+        render_acceptance_section(plan, None),
         "",
         "## CAM Policy",
         "",
@@ -1063,7 +1107,7 @@ def render_report(plan: Json) -> str:
         "",
         "Detailed machine-readable actions are in `plan.json`. Most users only need the manual items and acceptance checklist above.",
         "",
-    ])
+    ]
     return "\n".join(lines)
 
 
@@ -1079,94 +1123,298 @@ def render_human_plan_summary(plan: Json) -> str:
     return "\n".join(lines)
 
 
-def manual_checklist(plan: Json) -> List[Json]:
+def write_apply_report(plan_path: Path, plan: Json, state: Json, secrets_file: Path) -> Path:
+    report_path = plan_path.with_name(f"{plan_path.stem}.apply-report.md")
+    report_path.write_text(render_apply_report(plan, state, secrets_file), encoding="utf-8")
+    return report_path
+
+
+def render_apply_report(plan: Json, state: Json, secrets_file: Path) -> str:
+    return "\n".join([
+        "# Tencent COS/CDN Apply Report",
+        "",
+        render_human_plan_summary(plan),
+        "",
+        render_manual_section(plan, state, secrets_file),
+        "",
+        render_acceptance_section(plan, state),
+        "",
+        "## 本地文件 / Local Files",
+        "",
+        f"- TypeA secrets file: `{secrets_file}` if private CDN TypeA generated a key. Do not commit it.",
+        "",
+    ])
+
+
+def render_manual_section(plan: Json, state: Optional[Json], secrets_file: Optional[Path]) -> str:
+    lines = [
+        "## 必须手动完成 / Must Do Manually",
+        "",
+        "| 事项 | 入口链接 | 搜索关键词 | 应检查字段 | 当前状态 | 是否完成 | 未完成原因 | 操作链路 |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    items = manual_checklist(plan, state, secrets_file)
+    if not items:
+        lines.append("| 无 | - | - | - | - | 是 | - | - |")
+    for item in items:
+        lines.append(
+            f"| {item['title']} | {item['console']} | `{item['search']}` | {item['check']} | "
+            f"{item['current']} | {item['done']} | {item['reason']} | {item['action']} |"
+        )
+    return "\n".join(lines)
+
+
+def render_acceptance_section(plan: Json, state: Optional[Json], verify_results: Optional[List[Json]] = None) -> str:
+    lines = [
+        "## 用户验收清单 / User Acceptance Checklist",
+        "",
+        "| 资源 | 控制台入口 | 搜索关键词 | 应检查字段 | 当前 API/验证状态 | 是否完成 | 未完成原因 | 操作链路 |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for item in acceptance_checklist(plan, state, verify_results):
+        lines.append(
+            f"| {item['resource']} | {item['console']} | `{item['search']}` | {item['check']} | "
+            f"{item['current']} | {item['done']} | {item['reason']} | {item['action']} |"
+        )
+    return "\n".join(lines)
+
+
+def manual_checklist(plan: Json, state: Optional[Json] = None, secrets_file: Optional[Path] = None) -> List[Json]:
     items: List[Json] = []
     for action_obj in plan.get("actions", []):
         if action_obj.get("kind") == "manual.cos_cdn_service_authorization":
             params = action_obj.get("params", {})
+            current, done, reason = manual_status(action_obj, state)
             items.append({
-                "title": "Private CDN cannot fully work until COS private origin authorization is confirmed",
-                "console": "https://console.cloud.tencent.com/cos/bucket",
+                "title": "私有 CDN 必须确认 COS 私有回源授权",
+                "console": md_link("COS Bucket", CONSOLE_LINKS["cos_buckets"]),
                 "search": params.get("bucket", ""),
-                "check": "Domain and Transmission > Custom CDN acceleration domain; confirm the private CDN domain has COS private access / CDN service authorization enabled.",
-                "action": "If Tencent Cloud shows an authorization prompt, click the authorization button. If CosPrivateAccess is off, enable private COS origin access.",
+                "check": "Domain and Transmission > Custom CDN acceleration domain; confirm COS private access / CDN service authorization.",
+                "current": current,
+                "done": done,
+                "reason": reason,
+                "action": "打开入口链接 -> 搜索 bucket -> 点击 bucket -> 进入 Domain and Transmission -> Custom CDN acceleration domain -> 找到私有 CDN 域名 -> 开启/确认 COS 私有回源授权。",
             })
     private_auth = next((a for a in plan.get("actions", []) if a.get("kind") == "cdn.update_type_a_auth"), None)
     if private_auth:
         params = private_auth.get("params", {})
+        secrets_ref = str(secrets_file) if secrets_file else "the generated plan.secrets.json file"
+        current = "generated in local secrets file" if secrets_file and secrets_file.exists() else action_status_text([action_state(state, private_auth)])
         items.append({
-            "title": "Save the private CDN TypeA key to the backend secret system",
-            "console": "Local generated secrets file or environment variable",
+            "title": "保存 private CDN TypeA key 到后端密钥系统",
+            "console": "Local file only",
             "search": params.get("domain", ""),
             "check": "The key must be 6-32 letters/digits and must match the backend config that generates signed URLs.",
-            "action": "Do not commit the key. Store it in your deployment secret manager.",
+            "current": current,
+            "done": "No",
+            "reason": "The skill can generate/configure the CDN key, but a human must store the same key in the backend secret system.",
+            "action": f"打开 `{secrets_ref}` -> 复制 `{params.get('domain', '')}` 对应 key -> 保存到后端密钥系统 -> 确认 secrets 文件已加入 `.gitignore`。",
         })
     if any(a.get("kind", "").startswith("cdn.") for a in plan.get("actions", [])):
+        cdn_domains = [a.get("params", {}).get("domain", "") for a in plan.get("actions", []) if a.get("kind") == "cdn.add_domain"]
         items.append({
-            "title": "HTTPS certificate is not configured by this skill",
-            "console": "https://console.cloud.tencent.com/cdn/domains",
-            "search": "public/private CDN domains",
+            "title": "HTTPS 证书未由本 skill 配置",
+            "console": md_link("CDN Domains", CONSOLE_LINKS["cdn_domains"]),
+            "search": ", ".join(filter(None, cdn_domains)) or "public/private CDN domains",
             "check": "HTTPS Configuration tab; HTTPS switch and certificate status.",
-            "action": "Upload or select certificates if HTTPS access is required.",
+            "current": "not configured by this skill",
+            "done": "No",
+            "reason": "HTTPS certificate upload/selection still requires a certificate decision by the project owner.",
+            "action": "打开入口链接 -> 搜索 CDN 域名 -> Manage -> HTTPS Configuration -> 上传/选择证书 -> 如果项目需要 HTTPS URL，则开启 HTTPS。",
         })
     items.append({
-        "title": "Clean up temporary installer permissions after acceptance",
-        "console": "https://console.cloud.tencent.com/cam",
+        "title": "验收后清理临时 installer 权限",
+        "console": md_link("CAM Users", CONSOLE_LINKS["cam_users"]),
         "search": "cos-skill-installer-test or the installer CAM user",
         "check": "AdministratorAccess / temporary access key.",
-        "action": "Remove AdministratorAccess, disable the access key, or delete the temporary user after testing.",
+        "current": "must be checked by user",
+        "done": "No",
+        "reason": "Temporary installer credentials have broad permissions and should not remain active after acceptance.",
+        "action": "打开入口链接 -> 搜索 installer 用户 -> User Permissions 里解除 AdministratorAccess -> Access Keys 里禁用/删除密钥，或测试完成后直接删除该用户。",
     })
     return items
 
 
-def acceptance_checklist(plan: Json) -> List[Json]:
+def acceptance_checklist(plan: Json, state: Optional[Json] = None, verify_results: Optional[List[Json]] = None) -> List[Json]:
     items: List[Json] = []
     for bucket in plan.get("buckets", []):
+        states = action_states_for(state, plan, {"kind": {"cos.create_bucket", "cos.put_bucket_acl", "cos.put_bucket_cors"}, "bucket": bucket["name"]})
+        current, done, reason = aggregate_status(states, state)
         items.append({
             "resource": f"COS bucket {bucket['name']}",
-            "console": "https://console.cloud.tencent.com/cos/bucket",
+            "console": md_link("COS Bucket", CONSOLE_LINKS["cos_buckets"]),
             "search": bucket["name"],
             "check": "Bucket exists; ACL; CORS rules",
-            "expected": "Created and configured",
+            "current": current,
+            "done": done,
+            "reason": reason,
+            "action": "打开入口链接 -> 搜索 bucket 名 -> 点击 bucket -> 检查 Basic Configuration、Permission Management/ACL、Security Management/CORS。",
+        })
+    cam = plan.get("config", {}).get("cam", {})
+    cam_user = cam.get("user_name", "")
+    if cam_user:
+        states = action_states_for(state, plan, {"kind": {"cam.add_user"}, "name": cam_user})
+        current, done, reason = aggregate_status(states, state)
+        items.append({
+            "resource": f"CAM user {cam_user}",
+            "console": md_link("CAM Users", CONSOLE_LINKS["cam_users"]),
+            "search": cam_user,
+            "check": "User exists; console login disabled unless intentionally enabled; API access matches plan.",
+            "current": current,
+            "done": done,
+            "reason": reason,
+            "action": "打开入口链接 -> 搜索用户 -> 检查 User Details、Access Method、已绑定策略。",
         })
     cam_policy = plan.get("config", {}).get("cam", {}).get("policy_name", "")
     if cam_policy:
+        states = action_states_for(state, plan, {"kind": {"cam.create_policy", "cam.attach_user_policy"}, "policy_name": cam_policy})
+        current, done, reason = aggregate_status(states, state)
         items.append({
             "resource": "CAM app policy",
-            "console": "https://console.cloud.tencent.com/cam/policy",
+            "console": md_link("CAM Policies", CONSOLE_LINKS["cam_policies"]),
             "search": cam_policy,
             "check": "Policy exists; resource ARNs only include planned buckets",
-            "expected": "Created and attached",
+            "current": current,
+            "done": done,
+            "reason": reason,
+            "action": "打开入口链接 -> 搜索策略 -> 查看策略语法 -> 确认 resource 只包含计划中的 COS bucket -> 检查关联用户。",
         })
     for action_obj in plan.get("actions", []):
         kind = action_obj.get("kind")
         params = action_obj.get("params", {})
         if kind == "cdn.add_domain":
+            domain = params.get("domain", "")
+            states = action_states_for(state, plan, {"kind": {"cdn.add_domain", "cdn.enable_cos_private_access", "cdn.update_type_a_auth"}, "domain": domain})
+            current, done, reason = aggregate_status(states, state)
+            verify_current = verify_status_for(verify_results, domain)
+            if verify_current:
+                current = f"{current}; verify: {verify_current}"
             items.append({
-                "resource": f"CDN domain {params.get('domain')}",
-                "console": "https://console.cloud.tencent.com/cdn/domains",
-                "search": params.get("domain", ""),
+                "resource": f"CDN domain {domain}",
+                "console": md_link("CDN Domains", CONSOLE_LINKS["cdn_domains"]),
+                "search": domain,
                 "check": "Status; origin domain; HTTPS switch",
-                "expected": "Domain deployed; HTTPS may be off until manually configured",
+                "current": current,
+                "done": done,
+                "reason": reason,
+                "action": "打开入口链接 -> 搜索域名 -> Manage -> 检查 Status、Origin Configuration、HTTPS Configuration；私有 CDN 还要检查 Authentication。",
             })
         if kind == "dnspod.ensure_cname":
+            fqdn = params.get("fqdn", "")
+            states = action_states_for(state, plan, {"kind": {"dnspod.ensure_cname"}, "fqdn": fqdn})
+            current, done, reason = aggregate_status(states, state)
+            verify_current = verify_status_for(verify_results, fqdn)
+            if verify_current:
+                current = f"{current}; verify: {verify_current}"
             items.append({
-                "resource": f"DNSPod CNAME {params.get('fqdn')}",
-                "console": "https://console.cloud.tencent.com/cns",
-                "search": params.get("fqdn", ""),
+                "resource": f"DNSPod CNAME {fqdn}",
+                "console": md_link("DNSPod", CONSOLE_LINKS["dnspod"]),
+                "search": fqdn,
                 "check": "Record type CNAME; value points to Tencent CDN CNAME",
-                "expected": "Created and resolving",
+                "current": current,
+                "done": done,
+                "reason": reason,
+                "action": "打开入口链接 -> 点击 DNS zone -> 搜索子域名 -> 检查 Type=CNAME、Line=默认、Value 是 CDN CNAME target、Status 正常。",
             })
     return items
 
 
-def render_verify_report(plan: Json, results: List[Json]) -> str:
+def render_verify_report(plan: Json, results: List[Json], state: Optional[Json] = None) -> str:
     lines = ["# Tencent COS/CDN Verification", ""]
     lines.append(f"Generated for {len(plan.get('actions', []))} planned actions.")
     lines.append("")
     for result in results:
         lines.append(f"- {result['status'].upper()} {result['check']}: {result['detail']}")
+    lines.extend([
+        "",
+        render_manual_section(plan, state, None),
+        "",
+        render_acceptance_section(plan, state, results),
+    ])
     return "\n".join(lines)
+
+
+def md_link(label: str, url: str) -> str:
+    return f"[{label}]({url})"
+
+
+def manual_status(action_obj: Json, state: Optional[Json]) -> Tuple[str, str, str]:
+    state_item = action_state(state, action_obj)
+    if state_item and state_item.get("status") == "manual":
+        return "manual confirmation required", "No", "The script cannot prove this console-only authorization is complete."
+    if state_item and state_item.get("status") == "ok":
+        return action_status_text([state_item]), "No", "Still requires human console confirmation."
+    if state is None:
+        return "planned, not applied", "No", "Apply has not run yet."
+    return action_status_text([state_item]), "No", "Manual confirmation has not been recorded."
+
+
+def action_state(state: Optional[Json], action_obj: Json) -> Optional[Json]:
+    if not state:
+        return None
+    return (state.get("actions") or {}).get(action_obj.get("id"))
+
+
+def action_states_for(state: Optional[Json], plan: Json, matcher: Json) -> List[Optional[Json]]:
+    matched: List[Optional[Json]] = []
+    kinds = matcher.get("kind")
+    for action_obj in plan.get("actions", []):
+        if kinds and action_obj.get("kind") not in kinds:
+            continue
+        params = action_obj.get("params", {})
+        ok = True
+        for key, value in matcher.items():
+            if key == "kind":
+                continue
+            if params.get(key) != value:
+                ok = False
+                break
+        if ok:
+            matched.append(action_state(state, action_obj))
+    return matched
+
+
+def aggregate_status(states: List[Optional[Json]], state: Optional[Json]) -> Tuple[str, str, str]:
+    if state is None:
+        return "planned, not applied", "No", "Apply has not run yet."
+    if not states:
+        return "not planned", "No", "No matching planned action was found."
+    statuses = [(item or {}).get("status", "not-run") for item in states]
+    if any(status == "fail" for status in statuses):
+        return action_status_text(states), "No", first_failure_detail(states) or "At least one API action failed."
+    if all(status in {"ok", "skipped"} for status in statuses):
+        return action_status_text(states), "Yes", "-"
+    if any(status == "manual" for status in statuses):
+        return action_status_text(states), "No", "Manual confirmation is still required."
+    return action_status_text(states), "No", "Some planned actions have not run yet."
+
+
+def action_status_text(states: List[Optional[Json]]) -> str:
+    compact = []
+    for item in states:
+        if not item:
+            compact.append("not-run")
+            continue
+        status = item.get("status", "unknown")
+        detail = item.get("detail")
+        compact.append(f"{status}: {detail}" if detail else status)
+    return "; ".join(compact) if compact else "not-run"
+
+
+def first_failure_detail(states: List[Optional[Json]]) -> str:
+    for item in states:
+        if item and item.get("status") == "fail":
+            return str(item.get("detail") or "")
+    return ""
+
+
+def verify_status_for(results: Optional[List[Json]], token: str) -> str:
+    if not results or not token:
+        return ""
+    matched = [item for item in results if token in item.get("check", "")]
+    if not matched:
+        return ""
+    return "; ".join(f"{item.get('status')}: {item.get('detail')}" for item in matched)
 
 
 def load_config(path: Path) -> Json:
