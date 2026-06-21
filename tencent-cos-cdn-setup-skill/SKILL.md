@@ -20,7 +20,7 @@ Use this skill to build or audit a Tencent Cloud standard COS delivery stack. Pr
 6. Generate a plan before applying any real Tencent Cloud change:
 
 ```bash
-python scripts/tencent_cos_cdn.py plan config.json --out plan.json --report report.md
+python3 scripts/tencent_cos_cdn.py plan config.json --out plan.json --report report.md
 ```
 
 7. Summarize the plan in plain language for the user. Mention what will be created and what will remain manual.
@@ -29,15 +29,21 @@ python scripts/tencent_cos_cdn.py plan config.json --out plan.json --report repo
 ```bash
 export TENCENTCLOUD_SECRET_ID="..."
 export TENCENTCLOUD_SECRET_KEY="..."
-python scripts/tencent_cos_cdn.py apply plan.json --apply
+python3 scripts/tencent_cos_cdn.py apply plan.json --apply --stop-on-failure
 ```
 
 Without `--apply`, `apply` is a dry run.
 
+If an apply run fails after some actions succeed, resume with:
+
+```bash
+python3 scripts/tencent_cos_cdn.py resume plan.json --apply
+```
+
 9. Verify DNS/CDN behavior:
 
 ```bash
-python scripts/tencent_cos_cdn.py verify plan.json --report verify.md
+python3 scripts/tencent_cos_cdn.py verify plan.json --report verify.md
 ```
 
 ## Beginner Guidance
@@ -52,6 +58,8 @@ Follow these rules:
 - If Tencent Cloud credentials are missing, guide the user through creating a temporary installer sub-user first.
 - Use temporary broad permissions only for smoke testing, and tell the user to delete or disable the temporary key after testing.
 - After collecting answers, say what will be created in plain language, then ask whether to generate the plan.
+- Before real apply, ensure dependencies are installed. If missing, stop and tell the user to run `python3 -m pip install tencentcloud-sdk-python cos-python-sdk-v5`.
+- For private CDN, highlight that COS private origin authorization is mandatory and must be checked in the COS console even when the script tries to enable `CosPrivateAccess`.
 
 ## Guided Questions
 
@@ -104,30 +112,30 @@ Read `references/safety-rules.md` before applying changes to a real Tencent Clou
 Create a starter config:
 
 ```bash
-python scripts/tencent_cos_cdn.py init-config --mode public-private --out cos-cdn-config.json
+python3 scripts/tencent_cos_cdn.py init-config --mode public-private --out cos-cdn-config.json
 ```
 
 Render only the CAM policy:
 
 ```bash
-python scripts/tencent_cos_cdn.py render-policy config.json
+python3 scripts/tencent_cos_cdn.py render-policy config.json
 ```
 
 Show planned actions without contacting Tencent Cloud:
 
 ```bash
-python scripts/tencent_cos_cdn.py plan config.json --out plan.json
-python scripts/tencent_cos_cdn.py apply plan.json
+python3 scripts/tencent_cos_cdn.py plan config.json --out plan.json
+python3 scripts/tencent_cos_cdn.py apply plan.json
 ```
 
 Apply real changes:
 
 ```bash
-python scripts/tencent_cos_cdn.py apply plan.json --apply
+python3 scripts/tencent_cos_cdn.py apply plan.json --apply --stop-on-failure
 ```
 
 Verify after DNS propagation:
 
 ```bash
-python scripts/tencent_cos_cdn.py verify plan.json
+python3 scripts/tencent_cos_cdn.py verify plan.json
 ```

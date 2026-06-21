@@ -10,9 +10,13 @@ The script is intentionally conservative:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
+import re
+import secrets
 import socket
+import string
 import subprocess
 import sys
 import textwrap
@@ -34,6 +38,10 @@ DEFAULT_COS_ACTIONS = [
     "name/cos:DeleteObject",
 ]
 SECRET_KEYS = {"secret_key", "secretkey", "auth_key", "key", "password"}
+SECRET_KEYS.update({"secretid", "secret_id", "secretkey", "secret_key", "private_key"})
+TYPE_A_KEY_RE = re.compile(r"^[A-Za-z0-9]{6,32}$")
+TYPE_A_KEY_CHARS = string.ascii_letters + string.digits
+DEFAULT_DNSPOD_RECORD_LINE = "默认"
 
 
 class SkillError(Exception):
@@ -66,6 +74,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     apply_p.add_argument("plan")
     apply_p.add_argument("--apply", action="store_true", help="perform real cloud changes")
     apply_p.add_argument("--replace-dns", action="store_true", help="allow replacing conflicting DNSPod CNAME values")
+    apply_p.add_argument("--stop-on-failure", action="store_true", help="stop after the first failed action")
+    apply_p.add_argument("--state", help="state file for completed actions")
+    apply_p.add_argument("--secrets-file", help="local secrets file for generated CDN TypeA keys")
+    apply_p.add_argument("--resume", action="store_true", help="skip actions already marked ok in the state file")
+
+    resume = sub.add_parser("resume", help="resume a previous apply run from the state file")
+    resume.add_argument("plan")
+    resume.add_argument("--from", dest="resume_from", choices=["failed"], default="failed")
+    resume.add_argument("--apply", action="store_true", help="perform real cloud changes")
+    resume.add_argument("--replace-dns", action="store_true", help="allow replacing conflicting DNSPod CNAME values")
+    resume.add_argument("--stop-on-failure", action="store_true", default=True, help="stop after the first failed action")
+    resume.add_argument("--state", help="state file for completed actions")
+    resume.add_argument("--secrets-file", help="local secrets file for generated CDN TypeA keys")
 
     verify = sub.add_parser("verify", help="verify DNS and HTTP/CDN behavior")
     verify.add_argument("plan")
@@ -82,6 +103,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.command == "render-policy":
             return cmd_render_policy(args)
         if args.command == "apply":
+            return cmd_apply(args)
+        if args.command == "resume":
+            args.resume = True
             return cmd_apply(args)
         if args.command == "verify":
             return cmd_verify(args)
@@ -122,32 +146,59 @@ def cmd_render_policy(args: argparse.Namespace) -> int:
 
 
 def cmd_apply(args: argparse.Namespace) -> int:
-    plan = load_config(Path(args.plan))
+    plan_path = Path(args.plan)
+    plan = load_config(plan_path)
     actions = plan.get("actions", [])
     if not actions:
         print("No actions in plan.")
         return 0
 
     dry_run = not args.apply
-    print(f"mode: {'dry-run' if dry_run else 'apply'}")
-    print(render_plan_summary(plan))
-
     if dry_run:
+        print("mode: dry-run")
+        print(render_plan_summary(plan))
         print("Dry run only. Re-run with --apply to perform these actions.")
         return 0
 
+    preflight_apply(plan)
     creds = load_credentials()
-    ctx = ApplyContext(plan=plan, creds=creds, replace_dns=args.replace_dns)
+    print("mode: apply")
+    print(render_plan_summary(plan))
+    state_path = Path(args.state) if args.state else default_state_path(plan_path)
+    secrets_file = Path(args.secrets_file) if args.secrets_file else default_secrets_path(plan_path)
+    state = load_state(state_path)
+    ctx = ApplyContext(
+        plan=plan,
+        creds=creds,
+        replace_dns=args.replace_dns,
+        plan_path=plan_path,
+        state_path=state_path,
+        secrets_file=secrets_file,
+        state=state,
+    )
+    hydrate_context_from_state(ctx)
     results: List[Json] = []
     for index, action in enumerate(actions, start=1):
+        if args.resume and is_action_successful(ctx, action["id"]):
+            print(f"[{index}/{len(actions)}] {action['id']}")
+            print("  skipped: already ok in state")
+            continue
         print(f"[{index}/{len(actions)}] {action['id']}")
         result = apply_action(ctx, action)
         results.append(result)
+        remember_action_result(ctx, action, result)
         status = result.get("status", "unknown")
         detail = result.get("detail", "")
         print(f"  {status}{': ' + detail if detail else ''}")
+        if status == "fail" and args.stop_on_failure:
+            print(f"Stopped after first failure. Fix the issue and run: python3 {Path(__file__).name} resume {plan_path} --apply")
+            print(f"State file: {state_path}")
+            return 1
 
     print(json.dumps({"results": redact(results)}, indent=2, ensure_ascii=False))
+    print(f"State file: {state_path}")
+    if secrets_file.exists():
+        print(f"Local secrets file: {secrets_file} (do not commit; save generated CDN TypeA keys to your backend secret store)")
     return 0
 
 
@@ -195,6 +246,8 @@ def starter_config(mode: str) -> Json:
                 "key_env": "TENCENT_CDN_AUTH_KEY",
                 "sign_param": "sign",
                 "ttl_seconds": 3600,
+                "file_extensions": ["*"],
+                "filter_type": "blacklist",
             },
         },
         "dns": {
@@ -202,6 +255,7 @@ def starter_config(mode: str) -> Json:
             "zone": "example.com",
             "ttl": 600,
             "replace_existing": False,
+            "record_line": DEFAULT_DNSPOD_RECORD_LINE,
         },
     }
     if mode in {"public-only", "public-private"}:
@@ -279,21 +333,34 @@ def build_plan(config: Json) -> Json:
                 "service_type": cdn.get("service_type", "web"),
                 "area": cdn.get("area", "mainland"),
                 "origin": origin,
+                "origin_type": "cos",
+                "private_origin": bucket["kind"] == "private",
+                "https_enabled": bool(cdn.get("https_enabled", False)),
             }))
             if bucket["kind"] == "private":
                 auth = cdn.get("private_auth", {})
                 if auth.get("type", "tencent_type_a") != "tencent_type_a":
                     raise SkillError("Only tencent_type_a private CDN auth is supported.")
+                actions.append(action("cdn.enable_cos_private_access", f"Enable COS private origin access for {domain}", {
+                    "domain": domain,
+                    "origin": origin,
+                    "origin_type": "cos",
+                    "wait_timeout_seconds": int(cdn.get("deploy_wait_seconds", 300)),
+                }))
                 actions.append(action("cdn.update_type_a_auth", f"Configure CDN TypeA authentication for {domain}", {
                     "domain": domain,
                     "key_env": auth.get("key_env", "TENCENT_CDN_AUTH_KEY"),
                     "sign_param": auth.get("sign_param", "sign"),
                     "ttl_seconds": int(auth.get("ttl_seconds", 3600)),
+                    "file_extensions": auth.get("file_extensions", ["*"]),
+                    "filter_type": auth.get("filter_type", "blacklist"),
+                    "wait_timeout_seconds": int(cdn.get("deploy_wait_seconds", 300)),
                 }))
                 actions.append(action("manual.cos_cdn_service_authorization", f"Confirm COS CDN service authorization for {bucket['name']}", {
                     "bucket": bucket["name"],
                     "domain": domain,
                     "console_path": "COS > bucket > Domain and Transmission > Custom CDN acceleration domain",
+                    "must_check": True,
                 }))
             cname_key = f"{bucket['kind']}_cname_target"
             target = cdn.get(cname_key) or f"{domain}.cdn.dnsv1.com"
@@ -312,6 +379,7 @@ def build_plan(config: Json) -> Json:
                 "target": record["target"],
                 "ttl": int(dns.get("ttl", 600)),
                 "replace_existing": bool(dns.get("replace_existing", False)),
+                "record_line": dns.get("record_line", DEFAULT_DNSPOD_RECORD_LINE),
             }))
 
     return {
@@ -457,8 +525,79 @@ class ApplyContext:
     plan: Json
     creds: Credentials
     replace_dns: bool = False
+    plan_path: Optional[Path] = None
+    state_path: Optional[Path] = None
+    secrets_file: Optional[Path] = None
+    state: Optional[Json] = None
     cam_user_uin: Optional[int] = None
     cam_policy_id: Optional[int] = None
+
+
+def preflight_apply(plan: Json) -> None:
+    missing: List[str] = []
+    kinds = {action.get("kind", "") for action in plan.get("actions", [])}
+    if any(kind.startswith("cos.") for kind in kinds) and importlib.util.find_spec("qcloud_cos") is None:
+        missing.append("cos-python-sdk-v5")
+    if any(kind.startswith(("cam.", "cdn.", "dnspod.")) for kind in kinds) and importlib.util.find_spec("tencentcloud") is None:
+        missing.append("tencentcloud-sdk-python")
+    if missing:
+        packages = " ".join(sorted(set(missing)))
+        raise SkillError(
+            "missing Python dependencies. Install them first:\n"
+            f"python3 -m pip install {packages}\n"
+            "If your macOS Python blocks global installs, create a virtual environment and run the same command inside it."
+        )
+
+
+def default_state_path(plan_path: Path) -> Path:
+    return plan_path.with_name(f"{plan_path.stem}.state.json")
+
+
+def default_secrets_path(plan_path: Path) -> Path:
+    return plan_path.with_name(f"{plan_path.stem}.secrets.json")
+
+
+def load_state(path: Path) -> Json:
+    if not path.exists():
+        return {"version": 1, "actions": {}}
+    return load_config(path)
+
+
+def save_state(ctx: ApplyContext) -> None:
+    if not ctx.state_path or ctx.state is None:
+        return
+    write_json(ctx.state_path, ctx.state)
+
+
+def is_action_successful(ctx: ApplyContext, action_id: str) -> bool:
+    action_state = (ctx.state or {}).get("actions", {}).get(action_id) or {}
+    return action_state.get("status") in {"ok", "manual", "skipped"}
+
+
+def remember_action_result(ctx: ApplyContext, action_obj: Json, result: Json) -> None:
+    if ctx.state is None:
+        return
+    ctx.state.setdefault("actions", {})[action_obj["id"]] = {
+        "kind": action_obj["kind"],
+        "description": action_obj.get("description"),
+        "status": result.get("status"),
+        "detail": result.get("detail"),
+        "response": redact(result.get("response")),
+        "updated_at": int(time.time()),
+    }
+    save_state(ctx)
+
+
+def hydrate_context_from_state(ctx: ApplyContext) -> None:
+    actions = (ctx.state or {}).get("actions", {})
+    for item in actions.values():
+        if item.get("status") != "ok":
+            continue
+        response = item.get("response") or {}
+        if item.get("kind") == "cam.add_user" and response.get("Uin"):
+            ctx.cam_user_uin = int(response["Uin"])
+        if item.get("kind") == "cam.create_policy" and response.get("PolicyId"):
+            ctx.cam_policy_id = int(response["PolicyId"])
 
 
 def apply_action(ctx: ApplyContext, action_obj: Json) -> Json:
@@ -479,6 +618,8 @@ def apply_action(ctx: ApplyContext, action_obj: Json) -> Json:
             return apply_cam_attach_user_policy(ctx, params)
         if kind == "cdn.add_domain":
             return apply_cdn_add_domain(ctx, params)
+        if kind == "cdn.enable_cos_private_access":
+            return apply_cdn_enable_cos_private_access(ctx, params)
         if kind == "cdn.update_type_a_auth":
             return apply_cdn_update_type_a_auth(ctx, params)
         if kind == "dnspod.ensure_cname":
@@ -502,7 +643,7 @@ def cos_client(ctx: ApplyContext, region: str):
     try:
         from qcloud_cos import CosConfig, CosS3Client
     except ImportError as exc:
-        raise SkillError("missing cos-python-sdk-v5; install with: python -m pip install cos-python-sdk-v5") from exc
+        raise SkillError("missing cos-python-sdk-v5; install with: python3 -m pip install cos-python-sdk-v5") from exc
     config = CosConfig(Region=region, SecretId=ctx.creds.secret_id, SecretKey=ctx.creds.secret_key)
     return CosS3Client(config)
 
@@ -538,7 +679,7 @@ def tencent_client(ctx: ApplyContext, service: str):
         from tencentcloud.common.profile.client_profile import ClientProfile
         from tencentcloud.common.profile.http_profile import HttpProfile
     except ImportError as exc:
-        raise SkillError("missing tencentcloud-sdk-python; install with: python -m pip install tencentcloud-sdk-python") from exc
+        raise SkillError("missing tencentcloud-sdk-python; install with: python3 -m pip install tencentcloud-sdk-python") from exc
 
     cred = credential.Credential(ctx.creds.secret_id, ctx.creds.secret_key)
     http_profile = HttpProfile()
@@ -604,15 +745,19 @@ def apply_cam_attach_user_policy(ctx: ApplyContext, params: Json) -> Json:
 
 
 def apply_cdn_add_domain(ctx: ApplyContext, params: Json) -> Json:
+    origin_type = params.get("origin_type", "cos")
+    origin = {
+        "OriginType": origin_type,
+        "Origins": [params["origin"]],
+        "ServerName": params["origin"],
+    }
+    if params.get("private_origin"):
+        origin["CosPrivateAccess"] = "on"
     sdk_params = {
         "Domain": params["domain"],
         "ServiceType": params.get("service_type", "web"),
         "Area": params.get("area", "mainland"),
-        "Origin": {
-            "OriginType": "domain",
-            "Origins": [params["origin"]],
-            "ServerName": params["origin"],
-        },
+        "Origin": origin,
     }
     try:
         resp = sdk_call(ctx, "cdn", "AddCdnDomain", sdk_params)
@@ -623,11 +768,23 @@ def apply_cdn_add_domain(ctx: ApplyContext, params: Json) -> Json:
         raise
 
 
+def apply_cdn_enable_cos_private_access(ctx: ApplyContext, params: Json) -> Json:
+    wait_cdn_domain_ready(ctx, params["domain"], int(params.get("wait_timeout_seconds", 300)))
+    resp = sdk_call(ctx, "cdn", "UpdateDomainConfig", {
+        "Domain": params["domain"],
+        "Origin": {
+            "OriginType": params.get("origin_type", "cos"),
+            "Origins": [params["origin"]],
+            "ServerName": params["origin"],
+            "CosPrivateAccess": "on",
+        },
+    })
+    return {"status": "ok", "detail": "COS private origin access enabled", "response": resp}
+
+
 def apply_cdn_update_type_a_auth(ctx: ApplyContext, params: Json) -> Json:
-    key_env = params.get("key_env", "TENCENT_CDN_AUTH_KEY")
-    auth_key = os.environ.get(key_env)
-    if not auth_key:
-        raise SkillError(f"private CDN auth key is missing. Export {key_env}.")
+    wait_cdn_domain_ready(ctx, params["domain"], int(params.get("wait_timeout_seconds", 300)))
+    auth_key, key_detail = get_type_a_key(ctx, params)
     sdk_params = {
         "Domain": params["domain"],
         "Authentication": {
@@ -637,12 +794,81 @@ def apply_cdn_update_type_a_auth(ctx: ApplyContext, params: Json) -> Json:
                 "SecretKey": auth_key,
                 "SignParam": params.get("sign_param", "sign"),
                 "ExpireTime": int(params.get("ttl_seconds", 3600)),
-                "ExpireTimeFormat": "decimal",
+                "FileExtensions": params.get("file_extensions") or ["*"],
+                "FilterType": params.get("filter_type", "blacklist"),
             },
         },
     }
     resp = sdk_call(ctx, "cdn", "UpdateDomainConfig", sdk_params)
-    return {"status": "ok", "detail": "TypeA auth updated", "response": redact(resp)}
+    return {"status": "ok", "detail": f"TypeA auth updated; {key_detail}", "response": redact(resp)}
+
+
+def wait_cdn_domain_ready(ctx: ApplyContext, domain: str, timeout_seconds: int) -> None:
+    deadline = time.time() + max(timeout_seconds, 0)
+    last_status = "unknown"
+    while True:
+        status = get_cdn_domain_status(ctx, domain)
+        last_status = status or last_status
+        if status in {"online", "active"}:
+            return
+        if time.time() >= deadline:
+            raise SkillError(f"CDN domain {domain} is not ready yet; last status={last_status}. Retry resume after deployment completes.")
+        time.sleep(10)
+
+
+def get_cdn_domain_status(ctx: ApplyContext, domain: str) -> Optional[str]:
+    try:
+        resp = sdk_call(ctx, "cdn", "DescribeDomainsConfig", {"Domains": [domain]})
+    except Exception:
+        return None
+    configs = (
+        resp.get("Domains")
+        or resp.get("DomainsConfig")
+        or resp.get("DomainConfigs")
+        or []
+    )
+    if not configs:
+        return None
+    status = configs[0].get("Status") or configs[0].get("StatusCode")
+    return str(status).lower() if status else None
+
+
+def get_type_a_key(ctx: ApplyContext, params: Json) -> Tuple[str, str]:
+    key_env = params.get("key_env", "TENCENT_CDN_AUTH_KEY")
+    env_key = os.environ.get(key_env)
+    if env_key:
+        if not TYPE_A_KEY_RE.match(env_key):
+            raise SkillError(f"{key_env} must be 6-32 letters/digits for Tencent CDN TypeA.")
+        return env_key, f"using key from {key_env}"
+
+    secrets_data = load_local_secrets(ctx.secrets_file)
+    domain = params["domain"]
+    saved_key = (secrets_data.get("cdn_type_a") or {}).get(domain)
+    if saved_key:
+        if not TYPE_A_KEY_RE.match(saved_key):
+            raise SkillError(f"saved TypeA key for {domain} is invalid; delete it and rerun.")
+        return saved_key, f"using generated key from {ctx.secrets_file}"
+
+    generated = "".join(secrets.choice(TYPE_A_KEY_CHARS) for _ in range(32))
+    secrets_data.setdefault("cdn_type_a", {})[domain] = generated
+    save_local_secrets(ctx.secrets_file, secrets_data)
+    return generated, f"generated key saved to {ctx.secrets_file}; save it to your backend secret store"
+
+
+def load_local_secrets(path: Optional[Path]) -> Json:
+    if path is None or not path.exists():
+        return {}
+    return load_config(path)
+
+
+def save_local_secrets(path: Optional[Path], data: Json) -> None:
+    if path is None:
+        return
+    write_json(path, data)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
 
 
 def apply_dnspod_ensure_cname(ctx: ApplyContext, params: Json) -> Json:
@@ -669,7 +895,7 @@ def apply_dnspod_ensure_cname(ctx: ApplyContext, params: Json) -> Json:
             "RecordId": record_id,
             "SubDomain": subdomain,
             "RecordType": "CNAME",
-            "RecordLine": "Default",
+            "RecordLine": params.get("record_line", DEFAULT_DNSPOD_RECORD_LINE),
             "Value": target,
             "TTL": int(params.get("ttl", 600)),
         })
@@ -679,7 +905,7 @@ def apply_dnspod_ensure_cname(ctx: ApplyContext, params: Json) -> Json:
         "Domain": zone,
         "SubDomain": subdomain,
         "RecordType": "CNAME",
-        "RecordLine": "Default",
+        "RecordLine": params.get("record_line", DEFAULT_DNSPOD_RECORD_LINE),
         "Value": target,
         "TTL": int(params.get("ttl", 600)),
     })
@@ -687,16 +913,23 @@ def apply_dnspod_ensure_cname(ctx: ApplyContext, params: Json) -> Json:
 
 
 def dnspod_find_records(ctx: ApplyContext, zone: str, subdomain: str) -> List[Json]:
-    resp = sdk_call(ctx, "dnspod", "DescribeRecordList", {
-        "Domain": zone,
-        "Subdomain": subdomain,
-        "Limit": 100,
-    })
+    try:
+        resp = sdk_call(ctx, "dnspod", "DescribeRecordList", {
+            "Domain": zone,
+            "Subdomain": subdomain,
+            "Limit": 100,
+            "ErrorOnEmpty": "no",
+        })
+    except Exception as exc:  # noqa: BLE001 - Tencent returns NoDataOfRecord for an empty query in some accounts.
+        if "ResourceNotFound.NoDataOfRecord" in str(exc) or "NoDataOfRecord" in str(exc):
+            return []
+        raise
     return resp.get("RecordList") or []
 
 
 def verify_plan(plan: Json, timeout: int) -> List[Json]:
     results: List[Json] = []
+    domain_protocols = planned_domain_protocols(plan)
     for action_obj in plan.get("actions", []):
         if action_obj["kind"] != "dnspod.ensure_cname":
             continue
@@ -704,12 +937,30 @@ def verify_plan(plan: Json, timeout: int) -> List[Json]:
         fqdn = params["fqdn"]
         target = params["target"].rstrip(".")
         observed = resolve_dns(fqdn)
-        if any(item.rstrip(".") == target for item in observed):
-            results.append({"check": f"dns:{fqdn}", "status": "pass", "detail": f"CNAME includes {target}"})
+        cname_chain = resolve_cname_chain(fqdn)
+        all_dns = [item.rstrip(".") for item in observed + cname_chain]
+        if target in all_dns:
+            results.append({"check": f"dns:{fqdn}", "status": "pass", "detail": f"CNAME chain includes {target}"})
+        elif any(is_tencent_cdn_name(item) for item in all_dns):
+            results.append({"check": f"dns:{fqdn}", "status": "pass", "detail": f"resolved through Tencent CDN chain: {all_dns}"})
         else:
-            results.append({"check": f"dns:{fqdn}", "status": "warn", "detail": f"observed {observed or 'no result'}, expected {target}"})
-        results.append(check_http(f"https://{fqdn}/", timeout))
+            results.append({"check": f"dns:{fqdn}", "status": "warn", "detail": f"observed {all_dns or 'no result'}, expected {target}"})
+        protocol = domain_protocols.get(fqdn, "http")
+        if protocol == "https":
+            results.append(check_http(f"https://{fqdn}/", timeout))
+        else:
+            results.append({"check": f"https:{fqdn}", "status": "skipped", "detail": "HTTPS is not enabled in the plan; checking HTTP only."})
+            results.append(check_http(f"http://{fqdn}/", timeout))
     return results
+
+
+def planned_domain_protocols(plan: Json) -> Dict[str, str]:
+    protocols = {}
+    for item in plan.get("actions", []):
+        if item.get("kind") == "cdn.add_domain":
+            params = item.get("params", {})
+            protocols[params.get("domain")] = "https" if params.get("https_enabled") else "http"
+    return {key: value for key, value in protocols.items() if key}
 
 
 def resolve_dns(name: str) -> List[str]:
@@ -720,6 +971,26 @@ def resolve_dns(name: str) -> List[str]:
         return sorted({item[4][0] for item in socket.getaddrinfo(name, 443)})
     except socket.gaierror:
         return []
+
+
+def resolve_cname_chain(name: str, max_depth: int = 8) -> List[str]:
+    chain: List[str] = []
+    current = name.rstrip(".")
+    for _ in range(max_depth):
+        dig = subprocess.run(["/usr/bin/env", "dig", "+short", "CNAME", current], text=True, capture_output=True)
+        if dig.returncode != 0 or not dig.stdout.strip():
+            break
+        next_name = dig.stdout.splitlines()[0].strip().rstrip(".")
+        if not next_name or next_name in chain:
+            break
+        chain.append(next_name)
+        current = next_name
+    return chain
+
+
+def is_tencent_cdn_name(value: str) -> bool:
+    lowered = value.lower().rstrip(".")
+    return any(token in lowered for token in ("dnsv1.com", "cdntip.com", "cdn.dnsv1.com"))
 
 
 def check_http(url: str, timeout: int) -> Json:
@@ -754,7 +1025,33 @@ def render_report(plan: Json) -> str:
     lines = [
         "# Tencent COS/CDN Setup Plan",
         "",
-        render_plan_summary(plan),
+        render_human_plan_summary(plan),
+        "",
+        "## Must Do Manually",
+        "",
+    ]
+    manual_items = manual_checklist(plan)
+    if manual_items:
+        for item in manual_items:
+            lines.extend([
+                f"- **{item['title']}**",
+                f"  - Console: {item['console']}",
+                f"  - Search: `{item['search']}`",
+                f"  - Check: {item['check']}",
+                f"  - Action: {item['action']}",
+            ])
+    else:
+        lines.append("- No required manual steps detected in the plan.")
+    lines.extend([
+        "",
+        "## User Acceptance Checklist",
+        "",
+        "| Resource | Console | Search | Check fields | Expected status |",
+        "| --- | --- | --- | --- | --- |",
+    ])
+    for item in acceptance_checklist(plan):
+        lines.append(f"| {item['resource']} | {item['console']} | `{item['search']}` | {item['check']} | {item['expected']} |")
+    lines.extend([
         "",
         "## CAM Policy",
         "",
@@ -762,21 +1059,105 @@ def render_report(plan: Json) -> str:
         json.dumps(plan.get("cam_policy", {}), indent=2, ensure_ascii=False),
         "```",
         "",
-        "## Actions",
+        "## Technical Details",
         "",
-    ]
-    for item in plan.get("actions", []):
-        lines.extend([
-            f"### {item['kind']}",
-            "",
-            item["description"],
-            "",
-            "```json",
-            json.dumps(item.get("params", {}), indent=2, ensure_ascii=False),
-            "```",
-            "",
-        ])
+        "Detailed machine-readable actions are in `plan.json`. Most users only need the manual items and acceptance checklist above.",
+        "",
+    ])
     return "\n".join(lines)
+
+
+def render_human_plan_summary(plan: Json) -> str:
+    lines = [
+        "## Summary",
+        "",
+        f"- Buckets: {', '.join(bucket['name'] for bucket in plan.get('buckets', [])) or 'none'}",
+        f"- Planned actions: {len(plan.get('actions', []))}",
+    ]
+    for warning in plan.get("warnings", []):
+        lines.append(f"- Warning: {warning}")
+    return "\n".join(lines)
+
+
+def manual_checklist(plan: Json) -> List[Json]:
+    items: List[Json] = []
+    for action_obj in plan.get("actions", []):
+        if action_obj.get("kind") == "manual.cos_cdn_service_authorization":
+            params = action_obj.get("params", {})
+            items.append({
+                "title": "Private CDN cannot fully work until COS private origin authorization is confirmed",
+                "console": "https://console.cloud.tencent.com/cos/bucket",
+                "search": params.get("bucket", ""),
+                "check": "Domain and Transmission > Custom CDN acceleration domain; confirm the private CDN domain has COS private access / CDN service authorization enabled.",
+                "action": "If Tencent Cloud shows an authorization prompt, click the authorization button. If CosPrivateAccess is off, enable private COS origin access.",
+            })
+    private_auth = next((a for a in plan.get("actions", []) if a.get("kind") == "cdn.update_type_a_auth"), None)
+    if private_auth:
+        params = private_auth.get("params", {})
+        items.append({
+            "title": "Save the private CDN TypeA key to the backend secret system",
+            "console": "Local generated secrets file or environment variable",
+            "search": params.get("domain", ""),
+            "check": "The key must be 6-32 letters/digits and must match the backend config that generates signed URLs.",
+            "action": "Do not commit the key. Store it in your deployment secret manager.",
+        })
+    if any(a.get("kind", "").startswith("cdn.") for a in plan.get("actions", [])):
+        items.append({
+            "title": "HTTPS certificate is not configured by this skill",
+            "console": "https://console.cloud.tencent.com/cdn/domains",
+            "search": "public/private CDN domains",
+            "check": "HTTPS Configuration tab; HTTPS switch and certificate status.",
+            "action": "Upload or select certificates if HTTPS access is required.",
+        })
+    items.append({
+        "title": "Clean up temporary installer permissions after acceptance",
+        "console": "https://console.cloud.tencent.com/cam",
+        "search": "cos-skill-installer-test or the installer CAM user",
+        "check": "AdministratorAccess / temporary access key.",
+        "action": "Remove AdministratorAccess, disable the access key, or delete the temporary user after testing.",
+    })
+    return items
+
+
+def acceptance_checklist(plan: Json) -> List[Json]:
+    items: List[Json] = []
+    for bucket in plan.get("buckets", []):
+        items.append({
+            "resource": f"COS bucket {bucket['name']}",
+            "console": "https://console.cloud.tencent.com/cos/bucket",
+            "search": bucket["name"],
+            "check": "Bucket exists; ACL; CORS rules",
+            "expected": "Created and configured",
+        })
+    cam_policy = plan.get("config", {}).get("cam", {}).get("policy_name", "")
+    if cam_policy:
+        items.append({
+            "resource": "CAM app policy",
+            "console": "https://console.cloud.tencent.com/cam/policy",
+            "search": cam_policy,
+            "check": "Policy exists; resource ARNs only include planned buckets",
+            "expected": "Created and attached",
+        })
+    for action_obj in plan.get("actions", []):
+        kind = action_obj.get("kind")
+        params = action_obj.get("params", {})
+        if kind == "cdn.add_domain":
+            items.append({
+                "resource": f"CDN domain {params.get('domain')}",
+                "console": "https://console.cloud.tencent.com/cdn/domains",
+                "search": params.get("domain", ""),
+                "check": "Status; origin domain; HTTPS switch",
+                "expected": "Domain deployed; HTTPS may be off until manually configured",
+            })
+        if kind == "dnspod.ensure_cname":
+            items.append({
+                "resource": f"DNSPod CNAME {params.get('fqdn')}",
+                "console": "https://console.cloud.tencent.com/cns",
+                "search": params.get("fqdn", ""),
+                "check": "Record type CNAME; value points to Tencent CDN CNAME",
+                "expected": "Created and resolving",
+            })
+    return items
 
 
 def render_verify_report(plan: Json, results: List[Json]) -> str:

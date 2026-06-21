@@ -6,3 +6,7 @@ venv/
 plan.json
 report.md
 verify.md
+*.state.json
+*.secrets.json
+apply-results.md
+cos-cdn-report.md

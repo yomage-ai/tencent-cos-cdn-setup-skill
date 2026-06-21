@@ -13,15 +13,18 @@ This skill is a semi-automated setup assistant for standard Tencent Cloud COS de
 - Create a CAM custom policy and attach it to a newly created or provided sub-user UIN.
 - Add CDN acceleration domains using COS default bucket domains as origins.
 - Configure private CDN TypeA authentication when a private CDN domain is used.
+- Enable CDN COS private origin access for private COS origins when supported by the CDN API.
 - Create or update DNSPod CNAME records with conflict protection.
 - Verify DNS resolution and HTTPS/HTTP response headers.
+- Preflight Python SDK dependencies before real apply.
+- Persist apply state and resume after failed runs.
 
 ## Manual Or Confirmed Before Apply
 
 - Buying resource packs or enabling paid services.
 - ICP filing and domain ownership compliance.
 - HTTPS certificate upload/deployment, unless added in a future version.
-- COS private bucket CDN service authorization if Tencent Cloud does not expose a stable account-level API for the target account. The skill surfaces this as a post-apply console check.
+- COS private bucket CDN service authorization if Tencent Cloud still requires console confirmation for the target account. The script tries to enable `CosPrivateAccess`, but the report still surfaces the COS console check as mandatory for private CDN.
 - Destructive cleanup such as deleting buckets, CDN domains, policies, users, or DNS records.
 
 ## Tencent Cloud API Surfaces

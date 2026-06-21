@@ -45,8 +45,8 @@ For a beginner smoke test, guide the user through this:
    - Do not enable console login unless the page requires it.
    - Keep password/login-related options default if console login is disabled.
 9. User permissions:
-   - For a quick smoke test, attach **AdministratorAccess** or the broadest temporary admin/resource-management policy available.
-   - Explain that this is easiest for testing but too broad for long-term use.
+   - For this skill smoke test, attach **AdministratorAccess**.
+   - Explain that this is required for the simplest full test because the skill creates COS, CDN, DNSPod, and CAM resources.
    - Tell the user to disable or delete this key after the test.
    - For formal company use, ask an admin to provide a temporary key with COS, CDN, DNSPod, and CAM management permissions.
 10. Tags: keep default or skip.

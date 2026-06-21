@@ -67,7 +67,7 @@ Use $tencent-cos-cdn-setup-skill to plan Tencent COS + CDN + DNSPod setup for my
    - 不要勾选控制台登录，除非页面强制要求。
    - 登录密码、重置密码、MFA 等登录相关配置保持默认。
 9. 用户权限：
-   - 只做测试验收时，可以临时绑定 **AdministratorAccess**。
+   - 只做本 skill 的测试验收时，直接临时绑定 **AdministratorAccess**。
    - 这个权限很大，只适合临时测试；测试完成后删除这个子用户或禁用密钥。
    - 正式公司环境不要长期使用这个权限，应让管理员提供临时安装密钥。
 10. 用户标签：跳过或保持默认。
@@ -128,6 +128,24 @@ python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py apply plan.json
 ```
 
 不带 `--apply` 时，`apply` 只是 dry-run，不会改腾讯云。
+
+真实执行前请先安装依赖：
+
+```bash
+python3 -m pip install tencentcloud-sdk-python cos-python-sdk-v5
+```
+
+真实执行建议这样跑，失败时会停下来，修好后可以继续：
+
+```bash
+python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py apply plan.json --apply --stop-on-failure
+python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py resume plan.json --apply
+```
+
+执行后会生成：
+
+- `plan.state.json`：记录已经成功的动作，避免重复创建。
+- `plan.secrets.json`：如果自动生成了 private CDN TypeA key，会保存在这里。不要提交这个文件，要把 key 保存到你的后端密钥系统。
 
 ## English
 
@@ -190,7 +208,7 @@ This lets Codex call Tencent Cloud APIs to create test resources. For a beginner
    - Do not enable console login unless the page requires it.
    - Keep login password, password reset, and MFA settings at their defaults if console login is disabled.
 9. User permissions:
-   - For a smoke test, temporarily attach **AdministratorAccess**.
+   - For this skill smoke test, temporarily attach **AdministratorAccess**.
    - This is broad permission and should only be used for temporary testing.
    - Delete this sub-user or disable the key after testing.
    - For company production use, ask an administrator for a temporary installer key instead.
@@ -242,3 +260,21 @@ python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py apply plan.json
 ```
 
 Without `--apply`, `apply` is only a dry run and will not change Tencent Cloud.
+
+Install dependencies before real apply:
+
+```bash
+python3 -m pip install tencentcloud-sdk-python cos-python-sdk-v5
+```
+
+Recommended real apply flow:
+
+```bash
+python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py apply plan.json --apply --stop-on-failure
+python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py resume plan.json --apply
+```
+
+Generated local files:
+
+- `plan.state.json`: completed action state, used for resume.
+- `plan.secrets.json`: generated private CDN TypeA keys, if any. Do not commit it; store the key in your backend secret manager.

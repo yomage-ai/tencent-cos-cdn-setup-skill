@@ -4,12 +4,22 @@
 
 Always run `plan` first. Run `apply` without `--apply` to inspect the exact actions. Only use `--apply` after the user confirms the plan.
 
+For real apply, prefer:
+
+```bash
+python3 scripts/tencent_cos_cdn.py apply plan.json --apply --stop-on-failure
+python3 scripts/tencent_cos_cdn.py resume plan.json --apply
+```
+
+The state file prevents successful actions from being repeated during resume.
+
 ## Secrets
 
 - Read Tencent Cloud credentials from `TENCENTCLOUD_SECRET_ID` and `TENCENTCLOUD_SECRET_KEY`.
 - Read CDN TypeA auth keys from the environment variable named by `cdn.private_auth.key_env`.
 - Do not print SecretKey, TypeA keys, certificate private keys, or access-key secrets.
 - If CAM user creation returns a `SecretKey`, show only that a key was created; never include the secret in generated reports.
+- If the script generates a CDN TypeA key, save it from the local secrets file into the backend secret store and do not commit the secrets file.
 
 ## DNS
 
@@ -29,6 +39,9 @@ Always run `plan` first. Run `apply` without `--apply` to inspect the exact acti
 - Public CDN domains should not enable URL authentication by default.
 - Private CDN domains should enable TypeA authentication by default.
 - Private CDN TTL must match the application's download URL TTL.
+- TypeA keys must be 6-32 letters/digits. Do not use URL-safe keys with `-` or `_`.
+- Wait for CDN domains to finish deployment before updating TypeA authentication.
+- Private COS origins require COS private origin access / CDN service authorization. Treat the COS console check as mandatory.
 - Existing complex CDN configs should be queried and reviewed before partial updates. Tencent Cloud CDN `UpdateDomainConfig` can reset omitted nested fields for complex config objects.
 
 ## No Destructive Actions

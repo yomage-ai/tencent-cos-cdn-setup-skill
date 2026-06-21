@@ -45,14 +45,17 @@ Use JSON for the most portable path. YAML is also accepted when `PyYAML` is inst
       "type": "tencent_type_a",
       "key_env": "TENCENT_CDN_AUTH_KEY",
       "sign_param": "sign",
-      "ttl_seconds": 3600
+      "ttl_seconds": 3600,
+      "file_extensions": ["*"],
+      "filter_type": "blacklist"
     }
   },
   "dns": {
     "enabled": true,
     "zone": "example.com",
     "ttl": 600,
-    "replace_existing": false
+    "replace_existing": false,
+    "record_line": "默认"
   }
 }
 ```
@@ -82,6 +85,9 @@ When `cdn.enabled` is true:
 - Public domains are generated for the public bucket only.
 - Private domains are generated for the private bucket only.
 - `cdn.private_auth.key_env` names an environment variable. Store the real TypeA auth key there.
+- If the TypeA key env var is missing during `apply --apply`, the script generates a legal 32-character letters/digits key and saves it in the local secrets file.
+- Tencent CDN TypeA keys must be 6-32 letters/digits. Do not use URL-safe random strings containing `-` or `_`.
+- `file_extensions: ["*"]` with `filter_type: "blacklist"` means authenticate all files.
 - `cdn.private_auth.ttl_seconds` should match the application download URL TTL.
 
 The script uses COS default bucket domains as CDN origins:
@@ -98,6 +104,7 @@ When `dns.enabled` is true:
 - The script creates CNAME records for CDN domains.
 - By default, CNAME targets are generated as `<domain>.cdn.dnsv1.com`. Override with `cdn.public_cname_target` or `cdn.private_cname_target` if Tencent Cloud returns a different target.
 - Existing conflicting records stop the run unless `dns.replace_existing` is true or `--replace-dns` is passed.
+- Chinese Tencent Cloud/DNSPod accounts usually need `record_line: "默认"`. Use another line only when you know the account supports it.
 
 ## Credentials
 
