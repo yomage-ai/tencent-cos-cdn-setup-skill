@@ -1,7 +1,7 @@
 {
   "name": "tencent-cos-cdn-setup-skill",
-  "version": "0.1.0",
-  "description": "Install the Tencent COS/CDN setup Codex skill.",
+  "version": "0.2.0",
+  "description": "Install the Tencent COS/CDN setup Agent Skill for Codex, Claude Code, and compatible LLM agents.",
   "bin": "./bin/install.js",
   "files": [
     "bin/",
@@ -10,6 +10,8 @@
   ],
   "keywords": [
     "codex",
+    "claude-code",
+    "agent-skills",
     "skill",
     "tencent",
     "cos",
@@ -17,6 +19,9 @@
     "dnspod"
   ],
   "license": "MIT",
+  "dependencies": {
+    "@clack/prompts": "^1.2.0"
+  },
   "engines": {
     "node": ">=16"
   }

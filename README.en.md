@@ -2,30 +2,56 @@
 
 [中文](README.md) | [English](README.en.md)
 
-This is a Codex skill for connecting an app to a standard Tencent Cloud COS, CDN, DNSPod, and CAM permission setup. It generates a plan first and does not modify Tencent Cloud immediately. After you review the plan, you can let Codex apply the changes or follow the generated Manual Operator Guide in the Tencent Cloud console.
+This is an Agent Skill for Codex, Claude Code, and other LLM agents that support the Agent Skills directory structure. It connects an app to a standard Tencent Cloud COS, CDN, DNSPod, and CAM permission setup. It generates a plan first and does not modify Tencent Cloud immediately. After you review the plan, you can let your AI agent apply the changes or follow the generated Manual Operator Guide in the Tencent Cloud console.
 
 By default, generated working files are placed in an isolated run directory under the user cache, not in your project repository. After completion, you only need to copy the integration values into your app config.
 
 ## Install
 
-Current stable release:
+Recommended interactive installer:
 
 ```bash
-npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.1.0
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install
+```
+
+The wizard lets you choose where to install the skill:
+
+- Codex: installs to `~/.codex/skills/tencent-cos-cdn-setup-skill`
+- Claude Code: installs to `~/.claude/skills/tencent-cos-cdn-setup-skill`
+- Custom directory: for other LLM agents compatible with the `SKILL.md` directory structure
+
+Non-interactive installs:
+
+```bash
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install --client codex
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install --client claude-code
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install --all
 ```
 
 Overwrite an older install:
 
 ```bash
-npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.1.0 --force
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install --all --force
 ```
 
-Restart Codex after installation. When a new stable release is published, the maintainer updates the tag in the commands above, so users can copy the command directly.
+Install into a custom skills directory:
+
+```bash
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install --dest /path/to/skills
+```
+
+The old command still works and defaults to Codex:
+
+```bash
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0
+```
+
+Restart the target AI agent after installation. Claude Code usually detects changes under an existing skills directory live, but if the directory was created for the first time, restart Claude Code. When a new stable release is published, the maintainer updates the tag in the commands above, so users can copy the command directly.
 
 If `npx` is not available, use Codex's built-in `$skill-installer`:
 
 ```text
-$skill-installer install https://github.com/yomage-ai/tencent-cos-cdn-setup-skill/tree/v0.1.0/tencent-cos-cdn-setup-skill
+$skill-installer install https://github.com/yomage-ai/tencent-cos-cdn-setup-skill/tree/v0.2.0/tencent-cos-cdn-setup-skill
 ```
 
 ## What It Saves
@@ -38,13 +64,13 @@ The implementation uses Tencent Cloud's official SDKs and APIs: COS uses `cos-py
 
 ## Usage
 
-Create an empty setup folder, open Codex there, and say:
+Create an empty setup folder, open an AI agent where this skill is installed, and say:
 
 ```text
 Help me configure Tencent Cloud object storage for my app.
 ```
 
-Codex usually asks only three questions in the first round:
+The AI agent usually asks only three questions in the first round:
 
 - Is this for testing or production?
   This is used to generate resource names and report directories, such as `testing` / `prod`, so test and production resources do not get mixed. It does not skip confirmation.
@@ -69,11 +95,11 @@ Later, when the domain is ready, you can use the same skill to add CDN/DNS:
 Continue adding CDN/DNS for this previous project. COS buckets and CAM permissions are already configured. The previous report is at <path to the previous plan.report.md>. The domain is now managed in DNSPod, and the domain is example.com.
 ```
 
-If you cannot find the previous report, you can start again with the normal prompt, but try to provide the previous project name, environment, APPID, region, and bucket names. Codex will generate a new plan, reuse matching COS/CAM resources, and only add CDN/DNS. It still will not modify Tencent Cloud directly without confirmation.
+If you cannot find the previous report, you can start again with the normal prompt, but try to provide the previous project name, environment, APPID, region, and bucket names. The AI agent will generate a new plan, reuse matching COS/CAM resources, and only add CDN/DNS. It still will not modify Tencent Cloud directly without confirmation.
 
 ## Temporary Credentials
 
-Codex only asks for temporary `SecretId` / `SecretKey` when real Tencent Cloud changes are about to be applied. For beginner testing, create a temporary CAM sub-user, then delete that user or disable its access key after testing. Do not share `SecretKey`, CDN authentication keys, or certificate private keys in public repositories, screenshots, or chat groups.
+The AI agent only asks for temporary `SecretId` / `SecretKey` when real Tencent Cloud changes are about to be applied. For beginner testing, create a temporary CAM sub-user, then delete that user or disable its access key after testing. Do not share `SecretKey`, CDN authentication keys, or certificate private keys in public repositories, screenshots, or chat groups.
 
 ## Safety Boundaries
 
