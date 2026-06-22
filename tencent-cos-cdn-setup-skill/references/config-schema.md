@@ -96,6 +96,17 @@ The script uses COS default bucket domains as CDN origins:
 <bucket>.cos.<region>.myqcloud.com
 ```
 
+Existing CDN domains are reused only when their origin and service settings match the plan. A same-name domain with different origin/service configuration pauses the flow so the user can choose a new domain, manually review the existing domain, or skip CDN for now.
+
+## Existing CAM Resources
+
+When `cam.enabled` is true:
+
+- A same-name CAM user is reused as the existing target sub-user. The script does not silently change existing login or access-key settings.
+- A same-name CAM policy is reused only when its policy document exactly matches or is permission-equivalent to the planned least-privilege COS bucket policy and has no conflicting deny.
+- If the same-name policy is incompatible, the flow pauses. Choose a new `cam.policy_name`, manually review/update the existing policy in CAM, or skip the policy attachment until the user decides.
+- If the planned policy is already attached to the target user, the attach step is treated as complete.
+
 ## DNSPod
 
 When `dns.enabled` is true:
@@ -103,7 +114,7 @@ When `dns.enabled` is true:
 - `dns.zone` is the DNSPod root zone such as `example.com`.
 - The script creates CNAME records for CDN domains.
 - By default, CNAME targets are generated as `<domain>.cdn.dnsv1.com`. Override with `cdn.public_cname_target` or `cdn.private_cname_target` if Tencent Cloud returns a different target.
-- Existing conflicting records stop the run unless `dns.replace_existing` is true or `--replace-dns` is passed.
+- Existing conflicting records pause the flow unless `dns.replace_existing` is true or `--replace-dns` is passed after explicit user approval.
 - Chinese Tencent Cloud/DNSPod accounts usually need `record_line: "默认"`. Use another line only when you know the account supports it.
 
 ## Credentials

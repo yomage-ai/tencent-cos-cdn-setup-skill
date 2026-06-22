@@ -25,14 +25,17 @@ Use a run directory outside the user's project repository. The state file in tha
 
 - If no record exists, creating a CNAME is safe.
 - If an identical CNAME exists, skip it.
-- If a different CNAME exists, stop unless replacement is explicitly enabled.
-- If A/AAAA/TXT/MX or another record type exists for the same host, stop unless the user explicitly accepts the risk and replacement is supported.
+- If a different CNAME exists, pause and ask the user before replacement.
+- If A/AAAA/TXT/MX or another record type exists for the same host, pause and ask the user before replacement.
 
 ## CAM
 
 - Prefer a dedicated CAM sub-user per application/environment.
 - Keep `create_access_key` false unless the user explicitly asks for a long-lived key.
 - Use generated least-privilege policies for selected buckets. Do not attach administrator policies.
+- Reuse same-name CAM users only after confirming the existing user identity. Do not silently change existing login or access-key settings.
+- Reuse same-name CAM policies only after parsing the existing policy document and confirming it exactly matches or is permission-equivalent to the planned least-privilege bucket policy without a conflicting deny.
+- Do not silently update an existing CAM policy that may already be attached to other users, groups, or applications.
 
 ## CDN
 
@@ -43,6 +46,7 @@ Use a run directory outside the user's project repository. The state file in tha
 - Wait for CDN domains to finish deployment before updating TypeA authentication.
 - Private COS origins require COS private origin access / CDN service authorization. Treat the COS console check as mandatory.
 - Existing complex CDN configs should be queried and reviewed before partial updates. Tencent Cloud CDN `UpdateDomainConfig` can reset omitted nested fields for complex config objects.
+- Reuse existing CDN domains only when origin and service settings match the plan. Pause for user choice instead of overwriting a different existing CDN domain config.
 
 ## No Destructive Actions
 

@@ -16,14 +16,15 @@
 
 ## CAM
 
-- `SubUserNameInUse`: reuse the existing user and provide its UIN in config as `cam.user_uin`, or choose a new name.
-- `PolicyNameInUse`: reuse the existing policy ID if known or choose a new policy name.
-- Attach fails with user not found: `AttachUserPolicy` requires the sub-account UIN, not only the username.
+- `SubUserNameInUse`: the script will try to look up the existing user by name and use it as the target app sub-user. Check the report for any setting differences such as console login.
+- `PolicyNameInUse`: the script will fetch the existing policy and reuse it only when the document exactly matches or is permission-equivalent to the planned least-privilege COS bucket policy. Broader or mismatched policies pause the flow; choose a new `cam.policy_name`, manually review/update the existing policy in CAM, or skip policy attachment until the user decides.
+- Attach fails with user not found: the target sub-user could not be resolved. Choose an existing CAM user in the console or let the skill create a new one.
+- Attach reports already done: the target user already has the planned policy attached, so no extra action is needed.
 
 ## CDN
 
 - `CdnHostNoIcp`: use an eligible acceleration area or complete ICP filing.
-- `CdnHostExists`: reuse the domain and review existing config before updating.
+- `CdnHostExists`: the script will read the existing domain config and reuse it only when origin/service settings match the plan. If it fails compatibility, the flow pauses; use a new CDN domain, manually review the existing domain, or skip CDN for now.
 - `CdnConfigInvalidHost`: verify the domain is a valid public hostname.
 - `域名部署中，请在域名部署完成后重试`: run `resume "$RUN_DIR/plan.json" --apply` after the CDN domain status becomes deployed/online.
 - TypeA format error: ensure the key is 6-32 letters/digits and `FileExtensions`/`FilterType` are present.

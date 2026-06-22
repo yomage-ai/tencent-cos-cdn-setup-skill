@@ -12,15 +12,16 @@ Use this reference when the user is not familiar with Tencent Cloud setup.
 - Do not show `export TENCENTCLOUD_SECRET_ID=...` to beginners. Say "I will use the credentials locally after you provide them."
 - Do not ask beginners to install Python packages or SDKs. Let the script prepare its isolated runtime automatically.
 - Whenever the user must operate in Tencent Cloud, include the direct URL, click path, search keyword, fields to check, and exact action in the same response.
+- Also say whether the console step is required or optional.
 - Do not write generated working files into the user's project folder. Use the script's isolated run directory for config, plan, state, secrets, and reports.
 
 ## First Three Questions
 
 Ask only these first:
 
-1. Is this for testing or production?
-2. Do you need public files, private files, or both?
-3. Do you already have a domain in DNSPod?
+1. Is this for testing or production? Say this mainly affects generated resource names and safety prompts; it does not skip confirmation.
+2. Do you need public files, private files, or both? Say the standard setup supports one public bucket, one private bucket, or one of each.
+3. Do you already have a domain hosted in DNSPod? Say this means DNS records are managed in Tencent Cloud DNSPod and the account can add CNAME records; it is not ICP filing.
 
 If the user does not know:
 
@@ -66,14 +67,19 @@ When asking the user for APPID, give the direct entry and what to copy:
 
 - Open [Tencent Cloud Account Info](https://console.cloud.tencent.com/developer).
 - Search/check field: **APPID**.
-- Action: copy only the numeric APPID, not SecretId or UIN.
+- Action: copy only the numeric APPID, not SecretId, SecretKey, or any other account ID.
 
 ## Domain Step
 
 If the user has no domain:
 
-- Say: "We can still test COS buckets and permissions first. CDN/DNS can be added later."
+- Say: "We can still test COS buckets and permissions first. CDN/DNS can be added later with this same skill."
 - Set `cdn.enabled=false` and `dns.enabled=false` in the generated config.
+
+If the user has a domain but it is not hosted in DNSPod:
+
+- Say: "We can still plan COS and CAM now. I will leave DNS automation off, and the report can show what CNAME values to configure later."
+- Set `dns.enabled=false`. Enable CDN only if the user can manually create the required DNS record outside DNSPod.
 
 If the user has a domain:
 
@@ -84,6 +90,28 @@ Ask for:
 - Private file domain, or let the skill suggest `private.<root-domain>`.
 
 If the user is in Mainland China and the domain may not have ICP filing, recommend `overseas` CDN area for the smoke test.
+
+## Later Add CDN/DNS
+
+When the user comes back later with a domain, do not make them restart conceptually from zero.
+
+Ask for the previous report first:
+
+```text
+Do you still have the previous plan.report.md path? If yes, send it to me and I will reuse the existing COS/CAM values.
+```
+
+If they do not have the report, ask only for the missing basics: project name, environment, APPID, region, and existing bucket names. Then generate a new plan that reuses matching COS/CAM resources and adds CDN/DNS. Still ask for confirmation before applying real changes.
+
+## Existing Resource Conflicts
+
+If apply reports an incompatible existing CAM policy, CDN domain, or DNS record, do not call it a normal failure and do not overwrite it. Tell the user the flow is paused and give simple choices:
+
+- Use a new resource name and regenerate the plan.
+- Open the Tencent Cloud console to review/update the existing resource manually.
+- Skip that feature for now, such as leaving CDN/DNS for later.
+
+Continue only after the user chooses. Every console review action must include the direct URL, click path, search keyword, fields to check, exact action, and whether it is required.
 
 ## Private CDN Key
 
@@ -108,9 +136,17 @@ I prepared a plan. It will create:
 
 Nothing has been changed in Tencent Cloud yet.
 I kept the working files in an isolated run directory, not in your project folder.
+The report also has a Manual Operator Guide if you want to do the Tencent Cloud steps yourself.
 ```
 
 Avoid listing raw action IDs such as `cos.create_bucket` unless the user asks.
+
+After the plan summary, ask the user to choose one path:
+
+- AI applies the plan after explicit confirmation.
+- User follows the generated Manual Operator Guide.
+
+If the user chooses manual operation, give only the next one or two console actions in chat. Each action must include direct console URL, click path, search keyword, fields to check, exact action, and whether it is required.
 
 ## Apply Confirmation
 
@@ -146,5 +182,7 @@ After apply or verify, always give the user:
 - Link to the generated report file in the isolated run directory.
 - A short "Done / Not done yet" summary.
 - The top required manual actions with Tencent Cloud links and click paths.
+- For each top required manual action, include direct console URL, click path, search keyword, fields to check, exact action, and whether it is required.
+- If the user chose manual operation, point to the report's "Manual Operator Guide" and continue with only the next one or two actions at a time.
 
 Do not finish with only "generated report.md" or raw command output.

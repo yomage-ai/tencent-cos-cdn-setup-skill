@@ -22,7 +22,9 @@ import sys
 import textwrap
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
+import fnmatch
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -698,6 +700,8 @@ def hydrate_context_from_state(ctx: ApplyContext) -> None:
             ctx.cam_user_uin = int(response["Uin"])
         if item.get("kind") == "cam.create_policy" and response.get("PolicyId"):
             ctx.cam_policy_id = int(response["PolicyId"])
+        if item.get("kind") == "cam.create_policy" and response.get("reused_policy_id"):
+            ctx.cam_policy_id = int(response["reused_policy_id"])
 
 
 def apply_action(ctx: ApplyContext, action_obj: Json) -> Json:
@@ -814,12 +818,27 @@ def apply_cam_add_user(ctx: ApplyContext, params: Json) -> Json:
         "ConsoleLogin": int(params.get("console_login", 0)),
         "UseApi": int(params.get("use_api", 0)),
     }
-    resp = sdk_call(ctx, "cam", "AddUser", sdk_params)
-    ctx.cam_user_uin = int(resp.get("Uin"))
-    detail = f"created uin={ctx.cam_user_uin}"
-    if resp.get("SecretId"):
-        detail += " with access key (secret redacted)"
-    return {"status": "ok", "detail": detail, "response": redact(resp)}
+    try:
+        resp = sdk_call(ctx, "cam", "AddUser", sdk_params)
+        ctx.cam_user_uin = int(resp.get("Uin"))
+        detail = f"created uin={ctx.cam_user_uin}"
+        if resp.get("SecretId"):
+            detail += " with access key (secret redacted)"
+        return {"status": "ok", "detail": detail, "response": redact(resp)}
+    except Exception as exc:  # noqa: BLE001
+        if "SubUserNameInUse" not in str(exc):
+            raise
+        user = find_cam_user_by_name(ctx, params["name"])
+        if not user:
+            raise SkillError(f"CAM user {params['name']} already exists, but ListUsers/GetUser could not locate it.")
+        ctx.cam_user_uin = int(user["Uin"])
+        warnings = []
+        if int(user.get("ConsoleLogin") or 0) != int(params.get("console_login", 0)):
+            warnings.append("console login setting differs; reused without changing it")
+        detail = f"reused existing uin={ctx.cam_user_uin}"
+        if warnings:
+            detail += f" ({'; '.join(warnings)})"
+        return {"status": "ok", "detail": detail, "response": {"reused_user": redact(user)}}
 
 
 def apply_cam_create_policy(ctx: ApplyContext, params: Json) -> Json:
@@ -828,9 +847,28 @@ def apply_cam_create_policy(ctx: ApplyContext, params: Json) -> Json:
         "Description": params.get("description", ""),
         "PolicyDocument": json.dumps(params["policy_document"], separators=(",", ":")),
     }
-    resp = sdk_call(ctx, "cam", "CreatePolicy", sdk_params)
-    ctx.cam_policy_id = int(resp.get("PolicyId"))
-    return {"status": "ok", "detail": f"policy_id={ctx.cam_policy_id}", "response": resp}
+    try:
+        resp = sdk_call(ctx, "cam", "CreatePolicy", sdk_params)
+        ctx.cam_policy_id = int(resp.get("PolicyId"))
+        return {"status": "ok", "detail": f"policy_id={ctx.cam_policy_id}", "response": resp}
+    except Exception as exc:  # noqa: BLE001
+        if "PolicyNameInUse" not in str(exc):
+            raise
+        policy = find_cam_policy_by_name(ctx, params["policy_name"])
+        if not policy:
+            raise SkillError(f"CAM policy {params['policy_name']} already exists, but ListPolicies could not locate it.")
+        policy_id = int(policy["PolicyId"])
+        existing = get_cam_policy_document(ctx, policy_id)
+        required = params["policy_document"]
+        coverage = policy_coverage(existing, required)
+        if coverage == "incompatible":
+            raise SkillError(
+                f"CAM policy {params['policy_name']} already exists, but its document is not equivalent to the planned least-privilege COS bucket permissions. "
+                "This skill did not update the existing policy. Use a new cam.policy_name, provide a compatible existing policy, or manually review/update it in CAM."
+            )
+        ctx.cam_policy_id = policy_id
+        detail = f"reused existing policy_id={ctx.cam_policy_id}; policy document is {coverage}"
+        return {"status": "ok", "detail": detail, "response": {"reused_policy_id": policy_id, "coverage": coverage}}
 
 
 def apply_cam_attach_user_policy(ctx: ApplyContext, params: Json) -> Json:
@@ -840,6 +878,8 @@ def apply_cam_attach_user_policy(ctx: ApplyContext, params: Json) -> Json:
         raise SkillError("CAM user UIN is missing. Create a user in this run or set cam.user_uin.")
     if not policy_id:
         raise SkillError("CAM policy ID is missing. Create the policy in this run.")
+    if is_policy_attached_to_user(ctx, int(user_uin), int(policy_id)):
+        return {"status": "ok", "detail": "already attached", "response": {"AttachUin": int(user_uin), "PolicyId": int(policy_id)}}
     resp = sdk_call(ctx, "cam", "AttachUserPolicy", {"AttachUin": int(user_uin), "PolicyId": int(policy_id)})
     return {"status": "ok", "detail": "attached", "response": resp}
 
@@ -864,8 +904,206 @@ def apply_cdn_add_domain(ctx: ApplyContext, params: Json) -> Json:
         return {"status": "ok", "detail": "domain added", "response": resp}
     except Exception as exc:  # noqa: BLE001
         if "ResourceInUse.CdnHostExists" in str(exc) or "CdnHostExists" in str(exc):
-            return {"status": "ok", "detail": "domain already exists"}
+            existing = get_cdn_domain_config(ctx, params["domain"])
+            if not existing:
+                raise SkillError(f"CDN domain {params['domain']} already exists, but DescribeDomainsConfig could not read its config.")
+            if not cdn_domain_matches_plan(existing, params):
+                raise SkillError(
+                    f"CDN domain {params['domain']} already exists with a different origin/service configuration. "
+                    "This skill did not overwrite it. Use a new CDN domain or manually review the existing domain before reusing it."
+                )
+            return {"status": "ok", "detail": "reused existing domain; origin/service config matches plan", "response": redact(existing)}
         raise
+
+
+def find_cam_user_by_name(ctx: ApplyContext, name: str) -> Optional[Json]:
+    try:
+        user = sdk_call(ctx, "cam", "GetUser", {"Name": name})
+        if user.get("Uin"):
+            return user
+    except Exception:
+        pass
+    resp = sdk_call(ctx, "cam", "ListUsers", {})
+    for user in resp.get("Data") or []:
+        if user.get("Name") == name:
+            return user
+    return None
+
+
+def find_cam_policy_by_name(ctx: ApplyContext, name: str) -> Optional[Json]:
+    page = 1
+    while page <= 200:
+        resp = sdk_call(ctx, "cam", "ListPolicies", {"Scope": "Local", "Keyword": name, "Page": page, "Rp": 200})
+        items = resp.get("List") or []
+        for item in items:
+            if item.get("PolicyName") == name:
+                return item
+        total = int(resp.get("TotalNum") or 0)
+        if page * 200 >= total or not items:
+            break
+        page += 1
+    return None
+
+
+def get_cam_policy_document(ctx: ApplyContext, policy_id: int) -> Json:
+    resp = sdk_call(ctx, "cam", "GetPolicy", {"PolicyId": int(policy_id)})
+    doc = resp.get("PolicyDocument") or {}
+    if isinstance(doc, dict):
+        return doc
+    if not isinstance(doc, str):
+        raise SkillError(f"CAM policy {policy_id} returned an unsupported PolicyDocument format.")
+    candidates = [doc, urllib.parse.unquote(doc)]
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            continue
+    raise SkillError(f"CAM policy {policy_id} returned a PolicyDocument that could not be parsed as JSON.")
+
+
+def policy_coverage(existing: Json, required: Json) -> str:
+    if canonical_policy(existing) == canonical_policy(required):
+        return "exact match"
+    if policy_has_conflicting_deny(existing, required):
+        return "incompatible"
+    if policy_allows_required(existing, required) and policy_allows_required(required, existing):
+        return "equivalent permissions"
+    return "incompatible"
+
+
+def canonical_policy(policy: Json) -> Json:
+    statements = []
+    for stmt in policy_statements(policy):
+        statements.append({
+            "effect": str(stmt.get("effect", stmt.get("Effect", ""))).lower(),
+            "action": sorted(normalize_policy_values(stmt.get("action", stmt.get("Action", [])), lower=True)),
+            "resource": sorted(normalize_policy_values(stmt.get("resource", stmt.get("Resource", [])), lower=False)),
+        })
+    return {"version": str(policy.get("version", policy.get("Version", ""))), "statement": sorted(statements, key=json.dumps)}
+
+
+def policy_has_conflicting_deny(existing: Json, required: Json) -> bool:
+    denied = [stmt for stmt in policy_statements(existing) if policy_effect(stmt) == "deny"]
+    if not denied:
+        return False
+    for req in required_pairs(required):
+        for stmt in denied:
+            if statement_matches_pair(stmt, req["action"], req["resource"]):
+                return True
+    return False
+
+
+def policy_allows_required(existing: Json, required: Json) -> bool:
+    allow_statements = [stmt for stmt in policy_statements(existing) if policy_effect(stmt) == "allow"]
+    if not allow_statements:
+        return False
+    for req in required_pairs(required):
+        if not any(statement_matches_pair(stmt, req["action"], req["resource"]) for stmt in allow_statements):
+            return False
+    return True
+
+
+def required_pairs(policy: Json) -> List[Json]:
+    pairs: List[Json] = []
+    for stmt in policy_statements(policy):
+        if policy_effect(stmt) != "allow":
+            continue
+        for action_name in normalize_policy_values(stmt.get("action", stmt.get("Action", [])), lower=True):
+            for resource in normalize_policy_values(stmt.get("resource", stmt.get("Resource", [])), lower=False):
+                pairs.append({"action": action_name, "resource": resource})
+    return pairs
+
+
+def statement_matches_pair(stmt: Json, action_name: str, resource: str) -> bool:
+    actions = normalize_policy_values(stmt.get("action", stmt.get("Action", [])), lower=True)
+    resources = normalize_policy_values(stmt.get("resource", stmt.get("Resource", [])), lower=False)
+    return any(policy_pattern_match(pattern, action_name, lower=True) for pattern in actions) and any(
+        policy_pattern_match(pattern, resource, lower=False) for pattern in resources
+    )
+
+
+def policy_statements(policy: Json) -> List[Json]:
+    statement = policy.get("statement", policy.get("Statement", []))
+    if isinstance(statement, dict):
+        return [statement]
+    if isinstance(statement, list):
+        return [item for item in statement if isinstance(item, dict)]
+    return []
+
+
+def policy_effect(stmt: Json) -> str:
+    return str(stmt.get("effect", stmt.get("Effect", ""))).lower()
+
+
+def normalize_policy_values(value: Any, lower: bool) -> List[str]:
+    if value is None:
+        raw: List[Any] = []
+    elif isinstance(value, list):
+        raw = value
+    else:
+        raw = [value]
+    values = [str(item).strip() for item in raw if str(item).strip()]
+    if lower:
+        values = [item.lower() for item in values]
+    return values
+
+
+def policy_pattern_match(pattern: str, value: str, lower: bool) -> bool:
+    if lower:
+        pattern = pattern.lower()
+        value = value.lower()
+    return pattern == "*" or fnmatch.fnmatchcase(value, pattern)
+
+
+def is_policy_attached_to_user(ctx: ApplyContext, user_uin: int, policy_id: int) -> bool:
+    page = 1
+    while page <= 200:
+        resp = sdk_call(ctx, "cam", "ListAttachedUserPolicies", {"TargetUin": int(user_uin), "Page": page, "Rp": 200})
+        items = resp.get("List") or resp.get("PolicyList") or []
+        for item in items:
+            if int(item.get("PolicyId") or item.get("PolicyId".lower()) or 0) == int(policy_id):
+                return True
+        total = int(resp.get("TotalNum") or 0)
+        if page * 200 >= total or not items:
+            break
+        page += 1
+    return False
+
+
+def get_cdn_domain_config(ctx: ApplyContext, domain: str) -> Optional[Json]:
+    try:
+        resp = sdk_call(ctx, "cdn", "DescribeDomainsConfig", {"Domains": [domain]})
+    except Exception:
+        return None
+    configs = (
+        resp.get("Domains")
+        or resp.get("DomainsConfig")
+        or resp.get("DomainConfigs")
+        or []
+    )
+    if not configs:
+        return None
+    return next((item for item in configs if item.get("Domain") == domain), configs[0])
+
+
+def cdn_domain_matches_plan(existing: Json, params: Json) -> bool:
+    origin = existing.get("Origin") or {}
+    origins = [str(item).rstrip(".") for item in (origin.get("Origins") or [])]
+    planned_origin = str(params.get("origin", "")).rstrip(".")
+    if planned_origin and planned_origin not in origins:
+        return False
+    existing_origin_type = str(origin.get("OriginType") or "").lower()
+    planned_origin_type = str(params.get("origin_type") or "cos").lower()
+    if existing_origin_type and existing_origin_type != planned_origin_type:
+        return False
+    for key, param_key in [("ServiceType", "service_type"), ("Area", "area")]:
+        existing_value = existing.get(key)
+        planned_value = params.get(param_key)
+        if existing_value and planned_value and str(existing_value).lower() != str(planned_value).lower():
+            return False
+    return True
 
 
 def apply_cdn_enable_cos_private_access(ctx: ApplyContext, params: Json) -> Json:
@@ -1134,6 +1372,23 @@ def render_human_plan_summary(plan: Json) -> str:
     return "\n".join(lines)
 
 
+def render_operator_guide_section(plan: Json) -> str:
+    lines = [
+        "## 手动操作指南 / Manual Operator Guide",
+        "",
+        "如果不想让 AI 直接执行云资源变更，可以按本节逐项在腾讯云控制台操作。每一步都带有入口、点击路径、搜索关键词、检查字段和要填写/确认的值。",
+        "",
+        "| 步骤 | 是否必做 | 控制台入口 | 点击路径 | 搜索关键词 | 应检查字段 | 要做什么 / 填写值 |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for item in operator_guide_items(plan):
+        lines.append(
+            f"| {md_cell(item['step'])} | {md_cell(item['required'])} | {md_cell(item['console'])} | "
+            f"{md_cell(item['path'])} | `{md_cell(item['search'])}` | {md_cell(item['check'])} | {md_cell(item['action'])} |"
+        )
+    return "\n".join(lines)
+
+
 def write_combined_report(
     plan_path: Path,
     plan: Json,
@@ -1157,6 +1412,8 @@ def render_combined_report(
         "# Tencent COS/CDN Setup Report",
         "",
         render_human_plan_summary(plan),
+        "",
+        render_operator_guide_section(plan),
         "",
         render_apply_status_section(plan, state),
         "",
@@ -1233,8 +1490,8 @@ def render_manual_section(plan: Json, state: Optional[Json], secrets_file: Optio
         lines.append("| 无 | - | - | - | - | - | - | 是 | - |")
     for item in items:
         lines.append(
-            f"| {item['title']} | {item['required']} | {item['console']} | {item['action']} | `{item['search']}` | "
-            f"{item['check']} | {item['current']} | {item['done']} | {item['reason']} |"
+            f"| {md_cell(item['title'])} | {md_cell(item['required'])} | {md_cell(item['console'])} | {md_cell(item['action'])} | `{md_cell(item['search'])}` | "
+            f"{md_cell(item['check'])} | {md_cell(item['current'])} | {md_cell(item['done'])} | {md_cell(item['reason'])} |"
         )
     return "\n".join(lines)
 
@@ -1289,10 +1546,156 @@ def render_acceptance_section(plan: Json, state: Optional[Json], verify_results:
     ]
     for item in acceptance_checklist(plan, state, verify_results):
         lines.append(
-            f"| {item['resource']} | {item['required']} | {item['console']} | {item['action']} | `{item['search']}` | "
-            f"{item['check']} | {item['current']} | {item['done']} | {item['reason']} |"
+            f"| {md_cell(item['resource'])} | {md_cell(item['required'])} | {md_cell(item['console'])} | {md_cell(item['action'])} | `{md_cell(item['search'])}` | "
+            f"{md_cell(item['check'])} | {md_cell(item['current'])} | {md_cell(item['done'])} | {md_cell(item['reason'])} |"
         )
     return "\n".join(lines)
+
+
+def operator_guide_items(plan: Json) -> List[Json]:
+    cfg = plan.get("config", {})
+    cors = cfg.get("cors", {})
+    cors_methods = [m for m in (cors.get("methods") or ["GET", "PUT", "HEAD", "OPTIONS"]) if m != "OPTIONS"]
+    items: List[Json] = []
+    for bucket in plan.get("buckets", []):
+        items.append({
+            "step": f"创建/确认 COS bucket {bucket['name']}",
+            "required": "必做",
+            "console": md_link("COS Bucket", CONSOLE_LINKS["cos_buckets"]),
+            "path": "COS Bucket -> Create Bucket；如果已存在则搜索 bucket 并进入详情",
+            "search": bucket["name"],
+            "check": "Bucket name, Region, ACL, CORS rules",
+            "action": (
+                f"Region 选择 `{cfg.get('region', '')}`；Bucket 名为 `{bucket['name']}`；ACL 设置为 `{bucket['cos_acl']}`；"
+                f"CORS AllowedOrigin=`{', '.join(cors.get('origins') or [])}`，AllowedMethod=`{', '.join(cors_methods)}`，"
+                f"AllowedHeader=`{', '.join(cors.get('allowed_headers') or ['*'])}`，ExposeHeader=`{', '.join(cors.get('expose_headers') or ['ETag', 'Content-Length', 'Content-Type'])}`。"
+            ),
+        })
+
+    cam = cfg.get("cam", {})
+    if cam.get("enabled", True):
+        if cam.get("create_user", True) and cam.get("user_name"):
+            items.append({
+                "step": f"创建/确认 CAM 子用户 {cam['user_name']}",
+                "required": "必做",
+                "console": md_link("CAM Users", CONSOLE_LINKS["cam_users"]),
+                "path": "Users -> User List -> Create User；如果已存在则搜索用户名并进入详情",
+                "search": cam["user_name"],
+                "check": "User exists; console login disabled; API access only if project needs access keys",
+                "action": (
+                    f"用户名填 `{cam['user_name']}`；控制台登录保持关闭；"
+                    f"访问密钥/API access 按计划设置为 `{'开启' if cam.get('create_access_key') else '不开启'}`。如果同名用户已存在，只在确认这是本项目/本环境用户后复用。"
+                ),
+            })
+        if cam.get("policy_name"):
+            items.append({
+                "step": f"创建/确认 CAM 策略 {cam['policy_name']}",
+                "required": "必做",
+                "console": md_link("CAM Policies", CONSOLE_LINKS["cam_policies"]),
+                "path": "Policies -> Create Custom Policy -> Create by Policy Syntax；如果已存在则搜索策略并查看策略语法",
+                "search": cam["policy_name"],
+                "check": "Policy syntax; effect=allow; action/resource only cover planned COS buckets",
+                "action": (
+                    f"策略名填 `{cam['policy_name']}`；策略语法使用本报告 `CAM Policy` 一节。"
+                    "同名策略只有在语法完全一致或权限等价时才复用；更宽或不匹配的策略不会自动绑定，需换一个策略名或人工审核后再更新。"
+                ),
+            })
+            items.append({
+                "step": "绑定 CAM 策略到应用子用户",
+                "required": "必做",
+                "console": md_link("CAM Users", CONSOLE_LINKS["cam_users"]),
+                "path": "Users -> User List -> 搜索子用户 -> Permissions -> Attach Policy",
+                "search": cam.get("user_name") or cam.get("user_uin") or "target CAM user",
+                "check": "Attached policies include the planned custom policy",
+                "action": f"把策略 `{cam['policy_name']}` 绑定到目标子用户；如果已经绑定，保持不变。",
+            })
+
+    for action_obj in plan.get("actions", []):
+        kind = action_obj.get("kind")
+        params = action_obj.get("params", {})
+        if kind == "cdn.add_domain":
+            items.append({
+                "step": f"创建/确认 CDN 域名 {params.get('domain', '')}",
+                "required": "CDN enabled 时必做",
+                "console": md_link("CDN Domains", CONSOLE_LINKS["cdn_domains"]),
+                "path": "CDN Domains -> Add Domain；如果已存在则搜索域名并进入 Manage",
+                "search": params.get("domain", ""),
+                "check": "Domain, ServiceType, Area, OriginType, Origin domain, Status",
+                "action": (
+                    f"域名填 `{params.get('domain', '')}`；ServiceType=`{params.get('service_type', 'web')}`；Area=`{params.get('area', 'mainland')}`；"
+                    f"源站类型 `{params.get('origin_type', 'cos')}`；源站域名 `{params.get('origin', '')}`。"
+                    "同名 CDN 域名只有在源站和服务配置匹配时才复用。"
+                ),
+            })
+        if kind == "cdn.enable_cos_private_access":
+            items.append({
+                "step": f"开启私有 CDN 回源授权 {params.get('domain', '')}",
+                "required": "私有 CDN 必做",
+                "console": md_link("CDN Domains", CONSOLE_LINKS["cdn_domains"]),
+                "path": "CDN Domains -> 搜索域名 -> Manage -> Origin Configuration",
+                "search": params.get("domain", ""),
+                "check": "COS private origin access / CosPrivateAccess",
+                "action": f"确认域名 `{params.get('domain', '')}` 的 COS 私有回源访问已开启；源站为 `{params.get('origin', '')}`。",
+            })
+        if kind == "cdn.update_type_a_auth":
+            items.append({
+                "step": f"配置私有 CDN TypeA 鉴权 {params.get('domain', '')}",
+                "required": "私有 CDN 必做",
+                "console": md_link("CDN Domains", CONSOLE_LINKS["cdn_domains"]),
+                "path": "CDN Domains -> 搜索域名 -> Manage -> Access Control / URL Authentication",
+                "search": params.get("domain", ""),
+                "check": "Authentication switch, TypeA, SecretKey, SignParam, ExpireTime",
+                "action": (
+                    f"开启 URL Authentication；类型选 TypeA；签名参数 `{params.get('sign_param', 'sign')}`；有效期 `{params.get('ttl_seconds', 3600)}` 秒；"
+                    f"鉴权 key 使用环境变量 `{params.get('key_env', 'TENCENT_CDN_AUTH_KEY')}` 对应值，或使用 apply 后生成的本地 secrets 文件中的值。"
+                ),
+            })
+        if kind == "manual.cos_cdn_service_authorization":
+            items.append({
+                "step": "确认 COS 控制台里的 CDN 服务授权",
+                "required": "私有 CDN 必做",
+                "console": md_link("COS Bucket", CONSOLE_LINKS["cos_buckets"]),
+                "path": "COS Bucket -> 搜索 bucket -> Domain and Transmission -> Custom CDN acceleration domain",
+                "search": params.get("bucket", ""),
+                "check": "Private origin authorization / CDN service authorization",
+                "action": f"找到私有 CDN 域名 `{params.get('domain', '')}`，如果控制台出现授权提示，点击授权并确认状态正常。",
+            })
+        if kind == "dnspod.ensure_cname":
+            items.append({
+                "step": f"创建/确认 DNSPod CNAME {params.get('fqdn', '')}",
+                "required": "DNSPod enabled 时必做",
+                "console": md_link("DNSPod", CONSOLE_LINKS["dnspod"]),
+                "path": "DNSPod -> 点击 DNS zone -> Add Record；如果已存在则搜索子域名",
+                "search": params.get("fqdn", ""),
+                "check": "Record type, Line, Value, TTL, Status",
+                "action": (
+                    f"主机记录 `{params.get('subdomain', '')}`；记录类型 `CNAME`；线路 `{params.get('record_line', DEFAULT_DNSPOD_RECORD_LINE)}`；"
+                    f"记录值 `{params.get('target', '')}`；TTL `{params.get('ttl', 600)}`。已有不同记录时先人工确认，不要直接覆盖。"
+                ),
+            })
+
+    if any(a.get("kind", "").startswith("cdn.") for a in plan.get("actions", [])):
+        cdn_domains = [a.get("params", {}).get("domain", "") for a in plan.get("actions", []) if a.get("kind") == "cdn.add_domain"]
+        items.append({
+            "step": "按需配置 HTTPS 证书",
+            "required": "需要 HTTPS URL 时必做",
+            "console": md_link("CDN Domains", CONSOLE_LINKS["cdn_domains"]),
+            "path": "CDN Domains -> 搜索域名 -> Manage -> HTTPS Configuration",
+            "search": ", ".join(filter(None, cdn_domains)) or "CDN domain",
+            "check": "HTTPS switch, certificate, certificate validity",
+            "action": "如果项目要使用 HTTPS URL，上传/选择证书并开启 HTTPS；如果只是临时 HTTP 烟测，可暂不做。",
+        })
+
+    items.append({
+        "step": "验收后清理临时 installer 权限",
+        "required": "必做",
+        "console": md_link("CAM Users", CONSOLE_LINKS["cam_users"]),
+        "path": "Users -> User List -> 搜索 installer 用户 -> Permissions / Access Keys",
+        "search": "cos-skill-installer-test or the installer CAM user",
+        "check": "AdministratorAccess, temporary access keys",
+        "action": "验收完成后，解除临时 AdministratorAccess，禁用/删除临时访问密钥，或删除临时 installer 用户。",
+    })
+    return items
 
 
 def manual_checklist(plan: Json, state: Optional[Json] = None, secrets_file: Optional[Path] = None) -> List[Json]:
@@ -1446,6 +1849,11 @@ def acceptance_checklist(plan: Json, state: Optional[Json] = None, verify_result
 
 def md_link(label: str, url: str) -> str:
     return f"[{label}]({url})"
+
+
+def md_cell(value: Any) -> str:
+    text = str(value)
+    return text.replace("\n", "<br>").replace("|", "\\|")
 
 
 def manual_status(action_obj: Json, state: Optional[Json]) -> Tuple[str, str, str]:

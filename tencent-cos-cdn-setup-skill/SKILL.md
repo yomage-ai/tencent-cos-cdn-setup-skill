@@ -12,6 +12,9 @@ Use this skill to build or audit a Tencent Cloud standard COS delivery stack. Pr
 1. Start in guided mode unless the user already provides a config file. Ask one to three simple questions at a time. Do not dump the full schema on the user.
 2. If the user does not know an answer, propose a safe default and explain the tradeoff in one short sentence.
 3. Collect the minimum project parameters: project name, environment, Tencent Cloud APPID, region, whether a domain exists, whether DNSPod manages that domain, and whether the app needs public files, private files, or both.
+   - Environment mainly affects generated resource names, run directories, and safety prompts. It does not skip confirmation or change Tencent Cloud resource class by itself.
+   - File access mode is one of three standard layouts: one public bucket, one private bucket, or one public bucket plus one private bucket. If the user needs multiple bucket sets, run the skill separately per module/environment or ask for a custom config.
+   - DNSPod-managed domain means DNS records for the root domain are hosted in Tencent Cloud DNSPod and the current Tencent Cloud account can create CNAME records. It is not ICP filing and not "already pointed to CDN".
 4. Infer the setup mode:
    - Public images/files only -> `public-only`
    - Private downloads only -> `private-only`
@@ -30,7 +33,10 @@ python3 scripts/tencent_cos_cdn.py plan "$RUN_DIR/config.json" --out "$RUN_DIR/p
 ```
 
 8. Summarize the plan in plain language for the user. Mention what will be created and what will remain manual.
-9. Ask for explicit confirmation before applying real changes. For real cloud changes, export Tencent Cloud credentials and run:
+9. After the plan is generated, explicitly offer two paths:
+   - AI applies the plan after user confirmation.
+   - User applies it manually from the report's "Manual Operator Guide".
+10. Ask for explicit confirmation before applying real changes. For real cloud changes, export Tencent Cloud credentials and run:
 
 ```bash
 export TENCENTCLOUD_SECRET_ID="..."
@@ -46,13 +52,26 @@ If an apply run fails after some actions succeed, resume with:
 python3 scripts/tencent_cos_cdn.py resume "$RUN_DIR/plan.json" --apply
 ```
 
-10. Verify DNS/CDN behavior:
+11. Verify DNS/CDN behavior:
 
 ```bash
 python3 scripts/tencent_cos_cdn.py verify "$RUN_DIR/plan.json" --report "$RUN_DIR/plan.report.md"
 ```
 
 After apply or verify, summarize the integration values the project needs, point to the single combined report in the run directory (`$RUN_DIR/plan.report.md` by default), and summarize the top incomplete manual items. Do not end with only raw command output.
+
+## Existing Resource Reuse Policy
+
+Default behavior is safe reuse, not silent mutation.
+
+- COS bucket: reuse only when Tencent Cloud says the bucket is already owned by the account, then continue setting the planned ACL and CORS.
+- CAM user: if the planned user name already exists, look it up and use that existing sub-user. Do not change existing login or access-key settings silently; surface differences in the result/report.
+- CAM policy: if the planned policy name already exists, fetch and parse the current policy document. Reuse only when it is an exact match or permission-equivalent to the planned least-privilege COS bucket policy and has no conflicting deny. Broader or mismatched policies are not automatically attached; pause and ask the user to choose a new policy name, manually review/update the existing policy, or skip that step.
+- CAM policy attachment: if the policy is already attached to the target user, treat it as already done.
+- CDN domain: if the planned domain already exists, fetch the current config. Reuse only when origin/service settings match the plan; if it differs, pause and ask the user to choose a new domain, manually review the existing domain, or skip CDN for now.
+- DNSPod record: matching CNAME is reused. Conflicting records pause the flow unless replacement is explicitly enabled by the user.
+
+When a resource is incompatible or mismatched, pause the flow and ask the user to choose the next action, such as use a different resource name, manually review/update the existing resource, or skip that step. Continue only after the user answers. Do not automatically broaden an existing CAM policy that may be shared by other users/apps.
 
 ## Beginner Guidance
 
@@ -113,13 +132,20 @@ Use questions like these for beginners:
 
 If the user has no domain, plan COS and CAM first and leave CDN/DNS disabled or marked for later.
 
+If the user later returns to add CDN/DNS after COS/CAM was already configured:
+
+- Ask for the previous `plan.report.md` path or run directory first.
+- If the previous report is unavailable, ask for the previous project name, environment, Tencent Cloud APPID, region, and bucket names.
+- Build a new plan that reuses matching COS/CAM resources and adds CDN/DNS. Do not ask the user to start from scratch.
+- Still generate a plan first and ask for explicit confirmation before apply.
+
 If the user only wants a test run, recommend a non-production environment name and test-only resource names.
 
 For the first message after invocation, ask only:
 
-1. Is this a test or production setup?
-2. Does the app need public files, private files, or both?
-3. Do you already have a domain managed in DNSPod?
+1. Is this for testing or production? Explain that this mainly affects generated names and safety prompts.
+2. Does the app need public files, private files, or both? Explain the three standard layouts.
+3. Do you already have a domain hosted in DNSPod? Explain that this means DNS records are managed in DNSPod, not ICP filing.
 
 Infer the project name from the folder if the user does not care.
 
