@@ -4,7 +4,7 @@ This skill is a semi-automated setup assistant for standard Tencent Cloud COS de
 
 ## Automation Boundary
 
-Scriptable by default: run-directory creation, config normalization, plan generation, dependency runtime setup, COS bucket/ACL/CORS, CAM user/policy/attachment, CDN domain creation, private CDN TypeA auth, CDN COS private-origin switch when API-supported, DNSPod CNAME, state/resume, verification, and final integration/acceptance reports.
+Scriptable by default: run-directory creation, config normalization, plan generation, dependency runtime setup, COS bucket/ACL/CORS, CAM user/policy/attachment, CDN domain creation, private CDN TypeA auth, CDN COS private-origin switch when API-supported, DNSPod CNAME, state/resume, verification, and the final combined integration/acceptance report.
 
 Still human-confirmed or manual: choosing business intent, providing temporary installer credentials, deciding HTTPS certificates, confirming console-only private COS origin authorization when Tencent requires it, saving TypeA keys into the backend secret system, cleaning up broad installer permissions, and destructive cleanup.
 
@@ -24,7 +24,7 @@ Still human-confirmed or manual: choosing business intent, providing temporary i
 - Verify DNS resolution and HTTPS/HTTP response headers.
 - Auto-prepare isolated Python SDK dependencies before real apply.
 - Persist apply state and resume after failed runs.
-- Generate plan/apply/verify reports with console links, search keywords, check fields, current status, completion state, incomplete reason, and manual action paths.
+- Generate one combined plan/apply/verify report with console links, search keywords, check fields, current status, completion state, incomplete reason, and manual action paths.
 - Keep generated working files in an isolated run directory outside the user's project repository.
 - Render project integration values that the user should copy into their own app config.
 

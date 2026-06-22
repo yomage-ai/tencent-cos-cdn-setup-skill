@@ -23,10 +23,10 @@ Use this skill to build or audit a Tencent Cloud standard COS delivery stack. Pr
 RUN_DIR="$(python3 scripts/tencent_cos_cdn.py run-dir --project my-app --env testing --create)"
 ```
 
-7. Generate a plan before applying any real Tencent Cloud change. Write config, plan, state, secrets, and reports under the isolated run directory, not the user's project:
+7. Generate a plan before applying any real Tencent Cloud change. Write config, plan, state, secrets, and the combined report under the isolated run directory, not the user's project:
 
 ```bash
-python3 scripts/tencent_cos_cdn.py plan "$RUN_DIR/config.json" --out "$RUN_DIR/plan.json" --report "$RUN_DIR/plan.md"
+python3 scripts/tencent_cos_cdn.py plan "$RUN_DIR/config.json" --out "$RUN_DIR/plan.json" --report "$RUN_DIR/plan.report.md"
 ```
 
 8. Summarize the plan in plain language for the user. Mention what will be created and what will remain manual.
@@ -49,10 +49,10 @@ python3 scripts/tencent_cos_cdn.py resume "$RUN_DIR/plan.json" --apply
 10. Verify DNS/CDN behavior:
 
 ```bash
-python3 scripts/tencent_cos_cdn.py verify "$RUN_DIR/plan.json" --report "$RUN_DIR/verify.md"
+python3 scripts/tencent_cos_cdn.py verify "$RUN_DIR/plan.json" --report "$RUN_DIR/plan.report.md"
 ```
 
-After apply or verify, summarize the integration values the project needs, point to the generated apply/verify report in the run directory, and summarize the top incomplete manual items. Do not end with only raw command output.
+After apply or verify, summarize the integration values the project needs, point to the single combined report in the run directory (`$RUN_DIR/plan.report.md` by default), and summarize the top incomplete manual items. Do not end with only raw command output.
 
 ## Beginner Guidance
 
@@ -71,7 +71,7 @@ Follow these rules:
 
 ## Project File Rule
 
-Treat this skill as a one-time Tencent Cloud configuration assistant. Do not create `config.json`, `plan.json`, `report.md`, state files, secrets files, or verification reports inside the user's project repository by default.
+Treat this skill as a one-time Tencent Cloud configuration assistant. Do not create `config.json`, `plan.json`, `report.md`, state files, secrets files, or verification artifacts inside the user's project repository by default.
 
 Use an isolated run directory under the skill cache for all generated working files. Only write into the user's project if the user explicitly asks for a project config file or code change. The final answer should give the user the configuration values they need to copy into their own app config, plus the run-directory report path for audit/acceptance.
 
@@ -161,7 +161,7 @@ python3 scripts/tencent_cos_cdn.py render-policy "$RUN_DIR/config.json"
 Show planned actions without contacting Tencent Cloud:
 
 ```bash
-python3 scripts/tencent_cos_cdn.py plan "$RUN_DIR/config.json" --out "$RUN_DIR/plan.json" --report "$RUN_DIR/plan.md"
+python3 scripts/tencent_cos_cdn.py plan "$RUN_DIR/config.json" --out "$RUN_DIR/plan.json" --report "$RUN_DIR/plan.report.md"
 python3 scripts/tencent_cos_cdn.py apply "$RUN_DIR/plan.json"
 ```
 
@@ -174,5 +174,5 @@ python3 scripts/tencent_cos_cdn.py apply "$RUN_DIR/plan.json" --apply --stop-on-
 Verify after DNS propagation:
 
 ```bash
-python3 scripts/tencent_cos_cdn.py verify "$RUN_DIR/plan.json" --report "$RUN_DIR/verify.md"
+python3 scripts/tencent_cos_cdn.py verify "$RUN_DIR/plan.json" --report "$RUN_DIR/plan.report.md"
 ```

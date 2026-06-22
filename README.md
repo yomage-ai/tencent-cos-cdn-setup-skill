@@ -141,7 +141,7 @@ Codex 第一步只会生成计划，不应该直接修改腾讯云。
 ```bash
 RUN_DIR="$(python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py run-dir --project my-app --env testing --create)"
 python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py init-config --mode public-private --out "$RUN_DIR/config.json"
-python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py plan "$RUN_DIR/config.json" --out "$RUN_DIR/plan.json" --report "$RUN_DIR/plan.md"
+python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py plan "$RUN_DIR/config.json" --out "$RUN_DIR/plan.json" --report "$RUN_DIR/plan.report.md"
 python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py apply "$RUN_DIR/plan.json"
 ```
 
@@ -160,7 +160,7 @@ python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py resume "$RUN_DIR/
 
 - `$RUN_DIR/plan.state.json`：记录已经成功的动作，避免重复创建。
 - `$RUN_DIR/plan.secrets.json`：如果自动生成了 private CDN TypeA key，会保存在这里。不要提交这个文件，要把 key 保存到你的后端密钥系统。
-- `$RUN_DIR/plan.apply-report.md`：执行后的用户验收清单、必须手动完成事项、项目需要使用的配置数据。
+- `$RUN_DIR/plan.report.md`：plan、apply、verify 共用的本地合并报告，包含执行结果、验证结果、用户验收清单、必须手动完成事项、项目需要使用的配置数据。
 
 ### 备用安装方式
 
@@ -296,7 +296,7 @@ The skill also includes a CLI:
 ```bash
 RUN_DIR="$(python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py run-dir --project my-app --env testing --create)"
 python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py init-config --mode public-private --out "$RUN_DIR/config.json"
-python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py plan "$RUN_DIR/config.json" --out "$RUN_DIR/plan.json" --report "$RUN_DIR/plan.md"
+python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py plan "$RUN_DIR/config.json" --out "$RUN_DIR/plan.json" --report "$RUN_DIR/plan.report.md"
 python3 tencent-cos-cdn-setup-skill/scripts/tencent_cos_cdn.py apply "$RUN_DIR/plan.json"
 ```
 
@@ -315,7 +315,7 @@ Generated local files:
 
 - `$RUN_DIR/plan.state.json`: completed action state, used for resume.
 - `$RUN_DIR/plan.secrets.json`: generated private CDN TypeA keys, if any. Do not commit it; store the key in your backend secret manager.
-- `$RUN_DIR/plan.apply-report.md`: post-apply acceptance checklist, required manual actions, and project integration values.
+- `$RUN_DIR/plan.report.md`: combined local report shared by plan, apply, and verify, including apply results, verification results, acceptance checklist, required manual actions, and project integration values.
 
 ### Alternative Install
 

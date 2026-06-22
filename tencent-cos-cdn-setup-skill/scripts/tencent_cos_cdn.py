@@ -83,7 +83,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     plan = sub.add_parser("plan", help="generate a plan from config")
     plan.add_argument("config")
     plan.add_argument("--out")
-    plan.add_argument("--report")
+    plan.add_argument("--report", help="combined local report path; defaults to <plan>.report.md")
 
     render = sub.add_parser("render-policy", help="render only the CAM policy JSON")
     render.add_argument("config")
@@ -108,7 +108,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     verify = sub.add_parser("verify", help="verify DNS and HTTP/CDN behavior")
     verify.add_argument("plan")
-    verify.add_argument("--report")
+    verify.add_argument("--report", help="combined local report path; defaults to <plan>.report.md")
     verify.add_argument("--timeout", type=int, default=10)
 
     args = parser.parse_args(argv)
@@ -163,11 +163,9 @@ def cmd_plan(args: argparse.Namespace) -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     write_json(out_path, plan)
     print(f"wrote {out_path}")
-    if args.report:
-        Path(args.report).write_text(render_report(plan), encoding="utf-8")
-        print(f"wrote {args.report}")
-    else:
-        print(render_plan_summary(plan))
+    report_path = Path(args.report) if args.report else default_report_path(out_path)
+    report_path.write_text(render_combined_report(plan, None, None), encoding="utf-8")
+    print(f"Report: {report_path}")
     return 0
 
 
@@ -224,18 +222,18 @@ def cmd_apply(args: argparse.Namespace) -> int:
         detail = result.get("detail", "")
         print(f"  {status}{': ' + detail if detail else ''}")
         if status == "fail" and args.stop_on_failure:
-            report_path = write_apply_report(plan_path, plan, state, secrets_file)
+            report_path = write_combined_report(plan_path, plan, state, secrets_file)
             print(f"Stopped after first failure. Fix the issue and run: python3 {Path(__file__).name} resume {plan_path} --apply")
             print(f"State file: {state_path}")
-            print(f"Acceptance report: {report_path}")
+            print(f"Report: {report_path}")
             return 1
 
     print(json.dumps({"results": redact(results)}, indent=2, ensure_ascii=False))
     print(f"State file: {state_path}")
     if secrets_file.exists():
         print(f"Local secrets file: {secrets_file} (do not commit; save generated CDN TypeA keys to your backend secret store)")
-    report_path = write_apply_report(plan_path, plan, state, secrets_file)
-    print(f"Acceptance report: {report_path}")
+    report_path = write_combined_report(plan_path, plan, state, secrets_file)
+    print(f"Report: {report_path}")
     return 0
 
 
@@ -246,11 +244,11 @@ def cmd_verify(args: argparse.Namespace) -> int:
     state_path = default_state_path(plan_path)
     state = load_state(state_path) if state_path.exists() else None
     secrets_file = default_secrets_path(plan_path)
-    output = render_verify_report(plan, results, state, secrets_file if secrets_file.exists() else None)
-    if args.report:
-        Path(args.report).write_text(output, encoding="utf-8")
-        print(f"wrote {args.report}")
-    else:
+    report_path = Path(args.report) if args.report else default_report_path(plan_path)
+    output = render_combined_report(plan, state, secrets_file if secrets_file.exists() else None, results)
+    report_path.write_text(output, encoding="utf-8")
+    print(f"Report: {report_path}")
+    if not args.report:
         print(output)
     failed = [r for r in results if r["status"] == "fail"]
     return 1 if failed else 0
@@ -655,6 +653,10 @@ def default_secrets_path(plan_path: Path) -> Path:
     return plan_path.with_name(f"{plan_path.stem}.secrets.json")
 
 
+def default_report_path(plan_path: Path) -> Path:
+    return plan_path.with_name(f"{plan_path.stem}.report.md")
+
+
 def load_state(path: Path) -> Json:
     if not path.exists():
         return {"version": 1, "actions": {}}
@@ -927,7 +929,8 @@ def get_cdn_domain_status(ctx: ApplyContext, domain: str) -> Optional[str]:
     )
     if not configs:
         return None
-    status = configs[0].get("Status") or configs[0].get("StatusCode")
+    matched = next((item for item in configs if item.get("Domain") == domain), configs[0])
+    status = matched.get("Status") or matched.get("StatusCode")
     return str(status).lower() if status else None
 
 
@@ -1119,32 +1122,6 @@ def render_plan_summary(plan: Json) -> str:
     return "\n".join(lines)
 
 
-def render_report(plan: Json) -> str:
-    lines = [
-        "# Tencent COS/CDN Setup Plan",
-        "",
-        render_human_plan_summary(plan),
-        "",
-        render_integration_values(plan, None),
-        "",
-        render_manual_section(plan, None, None),
-        "",
-        render_acceptance_section(plan, None),
-        "",
-        "## CAM Policy",
-        "",
-        "```json",
-        json.dumps(plan.get("cam_policy", {}), indent=2, ensure_ascii=False),
-        "```",
-        "",
-        "## Technical Details",
-        "",
-        "Detailed machine-readable actions are in the generated plan file. Most users only need the integration values, manual items, and acceptance checklist above.",
-        "",
-    ]
-    return "\n".join(lines)
-
-
 def render_human_plan_summary(plan: Json) -> str:
     lines = [
         "## Summary",
@@ -1157,29 +1134,91 @@ def render_human_plan_summary(plan: Json) -> str:
     return "\n".join(lines)
 
 
-def write_apply_report(plan_path: Path, plan: Json, state: Json, secrets_file: Path) -> Path:
-    report_path = plan_path.with_name(f"{plan_path.stem}.apply-report.md")
-    report_path.write_text(render_apply_report(plan, state, secrets_file), encoding="utf-8")
+def write_combined_report(
+    plan_path: Path,
+    plan: Json,
+    state: Optional[Json],
+    secrets_file: Optional[Path],
+    verify_results: Optional[List[Json]] = None,
+) -> Path:
+    report_path = default_report_path(plan_path)
+    report_path.write_text(render_combined_report(plan, state, secrets_file, verify_results), encoding="utf-8")
     return report_path
 
 
-def render_apply_report(plan: Json, state: Json, secrets_file: Path) -> str:
+def render_combined_report(
+    plan: Json,
+    state: Optional[Json],
+    secrets_file: Optional[Path],
+    verify_results: Optional[List[Json]] = None,
+) -> str:
+    secrets_text = str(secrets_file) if secrets_file else "generated plan.secrets.json after apply"
     return "\n".join([
-        "# Tencent COS/CDN Apply Report",
+        "# Tencent COS/CDN Setup Report",
         "",
         render_human_plan_summary(plan),
+        "",
+        render_apply_status_section(plan, state),
+        "",
+        render_verification_section(plan, verify_results),
         "",
         render_integration_values(plan, secrets_file),
         "",
         render_manual_section(plan, state, secrets_file),
         "",
-        render_acceptance_section(plan, state),
+        render_acceptance_section(plan, state, verify_results),
+        "",
+        "## CAM Policy",
+        "",
+        "```json",
+        json.dumps(plan.get("cam_policy", {}), indent=2, ensure_ascii=False),
+        "```",
+        "",
+        "## Technical Details",
+        "",
+        "Detailed machine-readable actions are in the generated plan file. Most users only need the integration values, manual items, and acceptance checklist above.",
         "",
         "## 本地文件 / Local Files",
         "",
-        f"- TypeA secrets file: `{secrets_file}` if private CDN TypeA generated a key. Do not commit it.",
+        "- Combined report file: `<plan>.report.md` in the run directory, or the path passed with `--report`.",
+        f"- TypeA secrets file: `{secrets_text}` if private CDN TypeA generated a key. Do not commit it.",
         "",
     ])
+
+
+def render_apply_status_section(plan: Json, state: Optional[Json]) -> str:
+    lines = [
+        "## Apply Results",
+        "",
+    ]
+    if state is None:
+        lines.append("- NOT RUN: apply has not run yet.")
+        return "\n".join(lines)
+    for action_obj in plan.get("actions", []):
+        state_item = action_state(state, action_obj)
+        if not state_item:
+            lines.append(f"- NOT-RUN {action_obj.get('kind', '')}: {action_obj.get('description', '')}")
+            continue
+        status = str(state_item.get("status", "unknown")).upper()
+        detail = state_item.get("detail", "")
+        suffix = f": {detail}" if detail else ""
+        lines.append(f"- {status} {action_obj.get('kind', '')}: {action_obj.get('description', '')}{suffix}")
+    return "\n".join(lines)
+
+
+def render_verification_section(plan: Json, results: Optional[List[Json]]) -> str:
+    lines = [
+        "## Verification Results",
+        "",
+    ]
+    if results is None:
+        lines.append("- NOT RUN: verification has not run yet.")
+        return "\n".join(lines)
+    lines.append(f"Generated for {len(plan.get('actions', []))} planned actions.")
+    lines.append("")
+    for result in results:
+        lines.append(f"- {result['status'].upper()} {result['check']}: {result['detail']}")
+    return "\n".join(lines)
 
 
 def render_manual_section(plan: Json, state: Optional[Json], secrets_file: Optional[Path]) -> str:
@@ -1403,23 +1442,6 @@ def acceptance_checklist(plan: Json, state: Optional[Json] = None, verify_result
                 "action": "打开入口链接 -> 点击 DNS zone -> 搜索子域名 -> 检查 Type=CNAME、Line=默认、Value 是 CDN CNAME target、Status 正常。",
             })
     return items
-
-
-def render_verify_report(plan: Json, results: List[Json], state: Optional[Json] = None, secrets_file: Optional[Path] = None) -> str:
-    lines = ["# Tencent COS/CDN Verification", ""]
-    lines.append(f"Generated for {len(plan.get('actions', []))} planned actions.")
-    lines.append("")
-    for result in results:
-        lines.append(f"- {result['status'].upper()} {result['check']}: {result['detail']}")
-    lines.extend([
-        "",
-        render_integration_values(plan, secrets_file),
-        "",
-        render_manual_section(plan, state, None),
-        "",
-        render_acceptance_section(plan, state, results),
-    ])
-    return "\n".join(lines)
 
 
 def md_link(label: str, url: str) -> str:
