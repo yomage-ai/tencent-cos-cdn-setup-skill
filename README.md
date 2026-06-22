@@ -2,30 +2,56 @@
 
 [中文](README.md) | [English](README.en.md)
 
-这是一个给 Codex 用的 skill，用来把项目接入腾讯云标准 COS、CDN、DNSPod 和 CAM 权限。它会先生成计划，不会一上来就修改腾讯云；你确认后可以让 Codex 代执行，也可以自己按报告里的手动操作指南去腾讯云后台配置。
+这是一个给 Codex、Claude Code 等支持 Agent Skills 目录结构的 LLM 代理使用的 skill，用来把项目接入腾讯云标准 COS、CDN、DNSPod 和 CAM 权限。它会先生成计划，不会一上来就修改腾讯云；你确认后可以让 AI 代理代执行，也可以自己按报告里的手动操作指南去腾讯云后台配置。
 
 默认情况下，过程文件会放在用户缓存目录里的独立运行目录，不会写进你的项目仓库。完成后只需要拿走项目配置要用的值。
 
 ## 安装
 
-当前稳定版：
+推荐使用交互式安装向导：
 
 ```bash
-npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.1.0
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install
+```
+
+向导会让你选择安装到哪些 AI 代理：
+
+- Codex：默认安装到 `~/.codex/skills/tencent-cos-cdn-setup-skill`
+- Claude Code：默认安装到 `~/.claude/skills/tencent-cos-cdn-setup-skill`
+- 自定义目录：适合其他兼容 `SKILL.md` 目录结构的 LLM 代理
+
+也可以非交互安装：
+
+```bash
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install --client codex
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install --client claude-code
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install --all
 ```
 
 覆盖旧版本：
 
 ```bash
-npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.1.0 --force
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install --all --force
 ```
 
-安装完成后，重启 Codex。以后发布新版本时，维护者会把上面命令里的 tag 更新到最新稳定版，用户直接复制即可。
+安装到自定义 skills 目录：
+
+```bash
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install --dest /path/to/skills
+```
+
+旧命令仍然兼容，默认安装到 Codex：
+
+```bash
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0
+```
+
+安装完成后，重启对应的 AI 代理；Claude Code 通常会实时检测已有 skills 目录中的变更，但如果目录是首次创建，也建议重启。以后发布新版本时，维护者会把上面命令里的 tag 更新到最新稳定版，用户直接复制即可。
 
 如果不能使用 `npx`，可以用 Codex 自带的 `$skill-installer`：
 
 ```text
-$skill-installer install https://github.com/yomage-ai/tencent-cos-cdn-setup-skill/tree/v0.1.0/tencent-cos-cdn-setup-skill
+$skill-installer install https://github.com/yomage-ai/tencent-cos-cdn-setup-skill/tree/v0.2.0/tencent-cos-cdn-setup-skill
 ```
 
 ## 能节省什么
@@ -38,13 +64,13 @@ $skill-installer install https://github.com/yomage-ai/tencent-cos-cdn-setup-skil
 
 ## 使用
 
-新建一个空文件夹作为配置工作区，在里面打开 Codex，然后说：
+新建一个空文件夹作为配置工作区，在里面打开已安装该 skill 的 AI 代理，然后说：
 
 ```text
 帮我配置腾讯云的对象存储相关配置
 ```
 
-Codex 第一轮通常只问三个问题：
+AI 代理第一轮通常只问三个问题：
 
 - 这是测试环境还是生产环境？
   用来生成资源名字和报告目录，例如带上 `testing` / `prod`，避免测试资源和生产资源混在一起；不会跳过确认。
@@ -69,11 +95,11 @@ Codex 第一轮通常只问三个问题：
 继续给上次这个项目补 CDN/DNS。之前已经完成 COS bucket 和 CAM 权限配置，报告在 <上次的 plan.report.md 路径>。现在域名已经放在 DNSPod 管理，域名是 example.com。
 ```
 
-如果找不到上次报告，也可以重新说启动语，但尽量告诉 Codex 上次的项目名、环境、APPID、region 和已经创建好的 bucket 名。Codex 会重新生成计划，复用匹配的 COS/CAM，只补 CDN/DNS；仍然不会直接修改腾讯云。
+如果找不到上次报告，也可以重新说启动语，但尽量告诉 AI 代理上次的项目名、环境、APPID、region 和已经创建好的 bucket 名。它会重新生成计划，复用匹配的 COS/CAM，只补 CDN/DNS；仍然不会直接修改腾讯云。
 
 ## 临时密钥
 
-只有到了真实执行腾讯云变更时，Codex 才会让你准备临时安装用的 `SecretId` / `SecretKey`。小白测试时可以创建一个临时 CAM 子用户，测试完成后删除这个子用户或禁用密钥。不要把 `SecretKey`、CDN 鉴权 key、证书私钥发到公开仓库、截图或聊天群里。
+只有到了真实执行腾讯云变更时，AI 代理才会让你准备临时安装用的 `SecretId` / `SecretKey`。小白测试时可以创建一个临时 CAM 子用户，测试完成后删除这个子用户或禁用密钥。不要把 `SecretKey`、CDN 鉴权 key、证书私钥发到公开仓库、截图或聊天群里。
 
 ## 安全边界
 
