@@ -1532,7 +1532,17 @@ def render_integration_values(plan: Json, secrets_file: Optional[Path]) -> str:
         lines.append(f"| Browser CORS origins | `{', '.join(origins)}` | 允许浏览器直传/访问 COS 的前端来源。 |")
     cam = cfg.get("cam", {})
     if cam.get("user_name"):
-        lines.append(f"| App CAM user | `{cam.get('user_name')}` | 项目运行期可使用的最小权限子用户；若未创建 access key，需要在控制台按需创建。 |")
+        lines.append(f"| App CAM user | `{cam.get('user_name')}` | 项目运行期使用的最小权限子用户；后端接入 COS SDK/API 时，需要为该用户创建/确认并安全保存 access key。 |")
+        if cam.get("create_access_key"):
+            lines.append(
+                "| App CAM access key | `create_access_key=true; SecretKey is not stored in this report` | "
+                "脚本不会把 SecretKey 写入报告；如果没有通过安全渠道保存 SecretId/SecretKey，请在 CAM 控制台为 App CAM user 新建或轮换密钥，并保存到后端密钥系统；不要提交到代码仓库。 |"
+            )
+        else:
+            lines.append(
+                "| App CAM access key | `not created by this plan; manual console step` | "
+                "后端接入 COS SDK/API 必须拿到这组运行期凭据；请在 CAM 控制台为 App CAM user 手动创建访问密钥，并保存为后端密钥，例如 `TENCENTCLOUD_SECRET_ID` / `TENCENTCLOUD_SECRET_KEY`。 |"
+            )
     lines.append("")
     return "\n".join(lines)
 
@@ -1608,6 +1618,28 @@ def operator_guide_items(plan: Json) -> List[Json]:
                 "search": cam.get("user_name") or cam.get("user_uin") or "target CAM user",
                 "check": "Attached policies include the planned custom policy",
                 "action": f"把策略 `{cam['policy_name']}` 绑定到目标子用户；如果已经绑定，保持不变。",
+            })
+        if cam.get("user_name"):
+            if cam.get("create_access_key"):
+                action_text = (
+                    "脚本不会把 SecretKey 写入报告；如果没有通过安全渠道保存 SecretId/SecretKey，"
+                    "请在 API Key / Access Key 页面新建或轮换一个访问密钥，并保存到后端密钥系统。"
+                )
+                check_text = "Access key exists for backend runtime; SecretId/SecretKey are stored outside reports/code."
+            else:
+                action_text = (
+                    "在用户详情的 API Key / Access Key 页面手动创建后端运行期访问密钥；"
+                    "把 SecretId/SecretKey 保存到后端密钥系统，例如 `TENCENTCLOUD_SECRET_ID` / `TENCENTCLOUD_SECRET_KEY`。"
+                )
+                check_text = "Access key exists for backend runtime; SecretId/SecretKey are stored in the backend secret system."
+            items.append({
+                "step": "手动创建并保存 App CAM API 密钥",
+                "required": "后端接入 COS SDK/API 必做",
+                "console": md_link("CAM Users", CONSOLE_LINKS["cam_users"]),
+                "path": "Users -> User List -> 搜索子用户 -> User Details -> API Key / Access Key",
+                "search": cam["user_name"],
+                "check": check_text,
+                "action": f"{action_text}不要把 SecretKey 写入报告、聊天记录或代码仓库。",
             })
 
     for action_obj in plan.get("actions", []):
@@ -1731,6 +1763,30 @@ def manual_checklist(plan: Json, state: Optional[Json] = None, secrets_file: Opt
             "reason": "The skill can generate/configure the CDN key, but a human must store the same key in the backend secret system.",
             "action": f"打开 `{secrets_ref}` -> 复制 `{params.get('domain', '')}` 对应 key -> 保存到后端密钥系统 -> 确认 secrets 文件已加入 `.gitignore`。",
         })
+    cam = plan.get("config", {}).get("cam", {})
+    cam_user = cam.get("user_name", "")
+    if cam_user:
+        if cam.get("create_access_key"):
+            current = "create_access_key=true; SecretKey is not written to reports"
+            reason = "The skill never stores CAM SecretKey values in reports. If the runtime key was not saved through a secure channel, rotate or create a new key in the console."
+        else:
+            current = "create_access_key=false; runtime API key must be created manually in CAM"
+            reason = "The backend needs this App CAM SecretId/SecretKey to call COS SDK/API, and this skill keeps long-lived key creation as a manual console step."
+        items.append({
+            "title": "手动创建并保存 App CAM API 密钥",
+            "required": "后端接入 COS SDK/API 必做",
+            "console": md_link("CAM Users", CONSOLE_LINKS["cam_users"]),
+            "search": cam_user,
+            "check": "Access Keys / API Key; key belongs to the planned App CAM user; attached policy is least-privilege.",
+            "current": current,
+            "done": "No",
+            "reason": reason,
+            "action": (
+                "打开入口链接 -> 搜索 App CAM user -> 进入用户详情 -> API Key / Access Key -> "
+                "手动创建后端运行期访问密钥；如果已创建但没有安全保存 SecretKey，则新建/轮换一个 key -> "
+                "把 SecretId/SecretKey 保存到后端密钥系统，例如 `TENCENTCLOUD_SECRET_ID` / `TENCENTCLOUD_SECRET_KEY`，不要提交到代码仓库。"
+            ),
+        })
     if any(a.get("kind", "").startswith("cdn.") for a in plan.get("actions", [])):
         cdn_domains = [a.get("params", {}).get("domain", "") for a in plan.get("actions", []) if a.get("kind") == "cdn.add_domain"]
         items.append({
@@ -1804,6 +1860,24 @@ def acceptance_checklist(plan: Json, state: Optional[Json] = None, verify_result
             "done": done,
             "reason": reason,
             "action": "打开入口链接 -> 搜索策略 -> 查看策略语法 -> 确认 resource 只包含计划中的 COS bucket -> 检查关联用户。",
+        })
+    if cam_user:
+        if cam.get("create_access_key"):
+            current = "must confirm the SecretId/SecretKey is stored outside this report"
+            reason = "SecretKey values are intentionally omitted from generated reports. Rotate or create a new runtime key if it was not saved securely."
+        else:
+            current = "not created by this plan; manual console step"
+            reason = "The backend needs this App CAM access key for COS SDK/API calls, and this skill intentionally leaves long-lived runtime key creation to the console."
+        items.append({
+            "resource": "CAM app access key",
+            "required": "后端接入 COS SDK/API 必做",
+            "console": md_link("CAM Users", CONSOLE_LINKS["cam_users"]),
+            "search": cam_user,
+            "check": "Access key exists for the App CAM user; SecretId/SecretKey are stored in the backend secret system.",
+            "current": current,
+            "done": "No",
+            "reason": reason,
+            "action": "打开入口链接 -> 搜索用户 -> API Key / Access Key -> 手动创建或轮换后端运行期访问密钥 -> 保存 SecretId/SecretKey 到后端密钥系统，不要写入报告或代码仓库。",
         })
     for action_obj in plan.get("actions", []):
         kind = action_obj.get("kind")

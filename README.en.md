@@ -11,7 +11,7 @@ By default, generated working files are placed in an isolated run directory unde
 Recommended interactive installer:
 
 ```bash
-npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.1 install
 ```
 
 The wizard lets you choose where to install the skill:
@@ -23,27 +23,27 @@ The wizard lets you choose where to install the skill:
 Non-interactive installs:
 
 ```bash
-npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install --client codex
-npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install --client claude-code
-npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install --all
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.1 install --client codex
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.1 install --client claude-code
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.1 install --all
 ```
 
 Overwrite an older install:
 
 ```bash
-npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install --all --force
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.1 install --all --force
 ```
 
 Install into a custom skills directory:
 
 ```bash
-npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install --dest /path/to/skills
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.1 install --dest /path/to/skills
 ```
 
 The old command still works and defaults to Codex:
 
 ```bash
-npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.1
 ```
 
 Restart the target AI agent after installation. Claude Code usually detects changes under an existing skills directory live, but if the directory was created for the first time, restart Claude Code. When a new stable release is published, the maintainer updates the tag in the commands above, so users can copy the command directly.
@@ -51,7 +51,7 @@ Restart the target AI agent after installation. Claude Code usually detects chan
 If `npx` is not available, use Codex's built-in `$skill-installer`:
 
 ```text
-$skill-installer install https://github.com/yomage-ai/tencent-cos-cdn-setup-skill/tree/v0.2.0/tencent-cos-cdn-setup-skill
+$skill-installer install https://github.com/yomage-ai/tencent-cos-cdn-setup-skill/tree/v0.2.1/tencent-cos-cdn-setup-skill
 ```
 
 ## What It Saves
