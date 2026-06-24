@@ -1,6 +1,6 @@
 {
   "name": "tencent-cos-cdn-setup-skill",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Install the Tencent COS/CDN setup Agent Skill for Codex, Claude Code, and compatible LLM agents.",
   "bin": "./bin/install.js",
   "files": [

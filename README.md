@@ -11,7 +11,7 @@
 推荐使用交互式安装向导：
 
 ```bash
-npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.1 install
 ```
 
 向导会让你选择安装到哪些 AI 代理：
@@ -23,27 +23,27 @@ npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install
 也可以非交互安装：
 
 ```bash
-npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install --client codex
-npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install --client claude-code
-npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install --all
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.1 install --client codex
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.1 install --client claude-code
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.1 install --all
 ```
 
 覆盖旧版本：
 
 ```bash
-npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install --all --force
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.1 install --all --force
 ```
 
 安装到自定义 skills 目录：
 
 ```bash
-npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0 install --dest /path/to/skills
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.1 install --dest /path/to/skills
 ```
 
 旧命令仍然兼容，默认安装到 Codex：
 
 ```bash
-npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0
+npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.1
 ```
 
 安装完成后，重启对应的 AI 代理；Claude Code 通常会实时检测已有 skills 目录中的变更，但如果目录是首次创建，也建议重启。以后发布新版本时，维护者会把上面命令里的 tag 更新到最新稳定版，用户直接复制即可。
@@ -51,7 +51,7 @@ npx --yes github:yomage-ai/tencent-cos-cdn-setup-skill#v0.2.0
 如果不能使用 `npx`，可以用 Codex 自带的 `$skill-installer`：
 
 ```text
-$skill-installer install https://github.com/yomage-ai/tencent-cos-cdn-setup-skill/tree/v0.2.0/tencent-cos-cdn-setup-skill
+$skill-installer install https://github.com/yomage-ai/tencent-cos-cdn-setup-skill/tree/v0.2.1/tencent-cos-cdn-setup-skill
 ```
 
 ## 能节省什么
