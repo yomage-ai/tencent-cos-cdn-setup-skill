@@ -56,15 +56,17 @@ $skill-installer install https://github.com/yomage-ai/tencent-cos-cdn-setup-skil
 
 ## What It Saves
 
-A complete "public files + private files + CDN + DNSPod" setup usually involves 10-12 operations or checks across about 5 Tencent Cloud pages: COS buckets, CAM users, CAM policies, CDN domains, and DNSPod. HTTPS certificates may add one more decision/check.
+A complete "public files + private files + CDN + DNSPod" setup usually involves 10-12 operations or checks across about 5 Tencent Cloud pages: COS buckets, CAM users, CAM policies, CDN domains, and DNSPod. HTTPS certificates may also need to be handled as needed.
 
-If you already know which pages and values to configure, manual execution often still takes 45-90 minutes. If this is your first time figuring out the full COS + CDN + private-bucket flow, it can easily take half a day to more than a day, and it is easy to miss CORS, private COS origin access, TypeA authentication, CNAME records, or least-privilege CAM policies. With this skill, the common flow becomes: 3-10 minutes to generate the plan and guide, then 5-20 minutes to apply or confirm the steps. The remaining time is mostly CDN/DNS propagation. Actual savings depend on account state, domain/ICP status, certificates, and permission approvals.
+If this is your first time figuring out the full COS + CDN + private-bucket flow, it still takes some time to study, and it is easy to miss CORS, private COS origin access, TypeA authentication, CNAME records, or least-privilege CAM policies. With this skill, the common flow becomes: 3-10 minutes to generate the plan and operation guide, then 5-20 minutes to apply or confirm the steps by following the guide. The remaining time is mostly CDN/DNS propagation. Actual savings depend on account state, domain/ICP status, certificates, and permission approvals.
 
 The implementation uses Tencent Cloud's official SDKs and APIs: COS uses `cos-python-sdk-v5`; CAM, CDN, and DNSPod use `tencentcloud-sdk-python`. Cloud changes are made through official Tencent Cloud APIs using your Tencent Cloud credentials, and the manual guide links to Tencent Cloud's official console pages.
 
 ## Usage
 
-Create an empty setup folder, open an AI agent where this skill is installed, and say:
+If you only want to try it, create an empty setup folder. If you already have an app project, you can open an AI agent where this skill is installed directly in that project directory. By default, this skill writes plans, reports, state files, and temporary secret files to an isolated run directory, not into your project repository. After completion, copy the config values from the report back into your app.
+
+Open the AI agent and say:
 
 ```text
 Help me configure Tencent Cloud object storage for my app.
